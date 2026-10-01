@@ -25,7 +25,7 @@ def get_available_cameras(max_cameras=10):
 # -----------------------------
 root = tk.Tk()
 root.title("Camera Viewer")
-root.geometry("900300x700")
+root.geometry("900x700")
 root.resizable(True, True)
 
 # Camera list
