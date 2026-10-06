@@ -25,7 +25,7 @@ def get_available_cameras(max_cameras=10):
 # -----------------------------
 root = tk.Tk()
 root.title("Camera Viewer")
-root.geometry("900300x700")
+root.geometry("900x700")
 root.resizable(True, True)
 
 # Camera list
@@ -54,27 +54,107 @@ def change_camera(event=None):
 # -----------------------------
 # Dropdown
 # -----------------------------
-top_frame = tk.Frame(root)
-top_frame.pack(fill="x", padx=10, pady=10)
+# -----------------------------
+# Colors
+# -----------------------------
+BG = "#1e1e1e"
+PANEL = "#252526"
+BORDER = "#3c3c3c"
+TEXT = "white"
 
-tk.Label(top_frame, text="Camera:").pack(side="left")
+root.configure(bg=BG)
+
+# -----------------------------
+# Menu Bar
+# -----------------------------
+menu_frame = tk.Frame(root, bg=PANEL, height=40)
+menu_frame.pack(fill="x")
+
+tk.Label(
+    menu_frame,
+    text="Project Monday",
+    bg=PANEL,
+    fg=TEXT,
+    font=("Segoe UI", 14, "bold")
+).pack(side="left", padx=10)
+
+# -----------------------------
+# Camera Selection
+# -----------------------------
+camera_frame = tk.Frame(menu_frame, bg=PANEL)
+camera_frame.pack(side="right", padx=10)
+
+tk.Label(
+    camera_frame,
+    text="Camera:",
+    bg=PANEL,
+    fg=TEXT
+).pack(side="left")
 
 camera_dropdown = ttk.Combobox(
-    top_frame,
+    camera_frame,
     textvariable=selected_camera,
     values=camera_list,
     state="readonly",
-    width=10
+    width=5
 )
 
 camera_dropdown.pack(side="left", padx=5)
 camera_dropdown.bind("<<ComboboxSelected>>", change_camera)
 
 # -----------------------------
-# Camera View
+# Main Area
 # -----------------------------
-video_label = tk.Label(root, bg="black")
+main_frame = tk.Frame(root, bg=BG)
+main_frame.pack(fill="both", expand=True)
+
+preview_frame = tk.Frame(main_frame, bg="black")
+preview_frame.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+
+inspector_frame = tk.Frame(main_frame, bg=PANEL, width=250)
+inspector_frame.pack(side="right", fill="y", padx=5, pady=5)
+
+tk.Label(
+    inspector_frame,
+    text="Inspector",
+    bg=PANEL,
+    fg=TEXT,
+    font=("Segoe UI", 12, "bold")
+).pack(pady=10)
+
+# -----------------------------
+# Camera Preview
+# -----------------------------
+video_label = tk.Label(preview_frame, bg="black")
 video_label.pack(fill="both", expand=True)
+
+# -----------------------------
+# Timeline
+# -----------------------------
+timeline_frame = tk.Frame(root, bg=PANEL, height=150)
+timeline_frame.pack(fill="x", padx=5, pady=5)
+
+tk.Label(
+    timeline_frame,
+    text="Timeline",
+    bg=PANEL,
+    fg=TEXT,
+    font=("Segoe UI", 12, "bold")
+).pack(anchor="w", padx=10, pady=10)
+
+# -----------------------------
+# Status Bar
+# -----------------------------
+status_frame = tk.Frame(root, bg=PANEL, height=30)
+status_frame.pack(fill="x")
+
+status_label = tk.Label(
+    status_frame,
+    text="Status: Ready",
+    bg=PANEL,
+    fg="lightgray"
+)
+status_label.pack(side="left", padx=10)
 
 
 # -----------------------------
