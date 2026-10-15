@@ -317,44 +317,89 @@ class CameraViewerApp:
     # Main Workspace
     # ========================================================
 
-    def create_main_area(self):
+    class Workspace(tk.Frame):
 
-        self.main_frame = tk.Frame(
-            self.root,
-            bg=BG
-        )
+        def __init__(self, parent):
+            super().__init__(parent, bg=BG)
 
-        self.main_frame.pack(
-            fill="both",
-            expand=True
-        )
+            # Make the center/display area expand the most
+            self.grid_columnconfigure(0, weight=1)
+            self.grid_columnconfigure(1, weight=4)
+            self.grid_columnconfigure(2, weight=1)
 
-        # Camera preview
+            self.grid_rowconfigure(0, weight=4)
+            self.grid_rowconfigure(1, weight=2)
 
-        self.preview = CameraPreview(
-            self.main_frame
-        )
+            # -------------------------
+            # Asset Browser
+            # -------------------------
 
-        self.preview.pack(
-            side="left",
-            fill="both",
-            expand=True,
-            padx=5,
-            pady=5
-        )
+            self.assets = AssetBrowser(self)
 
-        # Inspector
+            self.assets.grid(
+                row=0,
+                column=0,
+                sticky="nsew",
+                padx=4,
+                pady=4
+            )
 
-        self.inspector = InspectorPanel(
-            self.main_frame
-        )
+            # -------------------------
+            # Main Display
+            # -------------------------
 
-        self.inspector.pack(
-            side="right",
-            fill="y",
-            padx=5,
-            pady=5
-        )
+            self.display = DisplayPanel(self)
+
+            self.display.grid(
+                row=0,
+                column=1,
+                columnspan=2,
+                sticky="nsew",
+                padx=4,
+                pady=4
+            )
+
+            # -------------------------
+            # Tools
+            # -------------------------
+
+            self.tools = ToolPanel(self)
+
+            self.tools.grid(
+                row=1,
+                column=0,
+                sticky="nsew",
+                padx=4,
+                pady=4
+            )
+
+            # -------------------------
+            # Timeline
+            # -------------------------
+
+            self.timeline = TimelinePanel(self)
+
+            self.timeline.grid(
+                row=1,
+                column=1,
+                sticky="nsew",
+                padx=4,
+                pady=4
+            )
+
+            # -------------------------
+            # Layers
+            # -------------------------
+
+            self.layers = LayerPanel(self)
+
+            self.layers.grid(
+                row=1,
+                column=2,
+                sticky="nsew",
+                padx=4,
+                pady=4
+            )
 
     # ========================================================
     # Timeline
