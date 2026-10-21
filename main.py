@@ -1,30 +1,27 @@
 
 import tkinter as tk
-from tkinter import ttk
-
+from tkinter import ttk, filedialog
 import cv2
 from PIL import Image, ImageTk
 
 
 # ============================================================
-# Application Settings
+# SETTINGS
 # ============================================================
 
 BG = "#1e1e1e"
 PANEL = "#252526"
+PANEL_LIGHT = "#2d2d30"
 BORDER = "#3c3c3c"
 TEXT = "white"
+TEXT_DIM = "#bdbdbd"
 
-WINDOW_WIDTH = 900
-WINDOW_HEIGHT = 700
-
-PREVIEW_WIDTH = 640
-PREVIEW_HEIGHT = 480
+WINDOW_WIDTH = 1200
+WINDOW_HEIGHT = 800
 
 
 # ============================================================
-# Camera Manager
-# Handles camera detection, opening, switching, and reading.
+# CAMERA MANAGER
 # ============================================================
 
 class CameraManager:
@@ -34,12 +31,15 @@ class CameraManager:
         self.camera_index = None
 
     def find_available_cameras(self, max_cameras=10):
+
         cameras = []
 
         for index in range(max_cameras):
+
             cap = cv2.VideoCapture(index)
 
             if cap.isOpened():
+
                 ret, _ = cap.read()
 
                 if ret:
@@ -50,6 +50,7 @@ class CameraManager:
         return cameras
 
     def open_camera(self, camera_index):
+
         self.release()
 
         self.camera_index = camera_index
@@ -58,6 +59,7 @@ class CameraManager:
         return self.cap.isOpened()
 
     def read_frame(self):
+
         if self.cap is None:
             return False, None
 
@@ -67,43 +69,96 @@ class CameraManager:
         return self.cap.read()
 
     def release(self):
+
         if self.cap is not None:
             self.cap.release()
             self.cap = None
 
 
 # ============================================================
-# Camera Preview
-# Responsible only for displaying camera frames.
+# DISPLAY PANEL
+# Camera / image / composite display
 # ============================================================
 
-class CameraPreview(tk.Frame):
+class DisplayPanel(tk.Frame):
 
     def __init__(self, parent):
-        super().__init__(parent, bg="black")
 
-        self.video_label = tk.Label(
+        super().__init__(
+            parent,
+            bg=PANEL,
+            highlightbackground=BORDER,
+            highlightthickness=1
+        )
+
+        title_bar = tk.Frame(
+            self,
+            bg=PANEL
+        )
+
+        title_bar.pack(
+            fill="x"
+        )
+
+        tk.Label(
+            title_bar,
+            text="Display",
+            bg=PANEL,
+            fg=TEXT,
+            font=("Segoe UI", 11, "bold")
+        ).pack(
+            side="left",
+            padx=10,
+            pady=7
+        )
+
+        self.display = tk.Label(
             self,
             bg="black"
         )
 
-        self.video_label.pack(
+        self.display.pack(
             fill="both",
-            expand=True
+            expand=True,
+            padx=5,
+            pady=(0, 5)
         )
 
     def display_frame(self, frame):
 
-        # OpenCV uses BGR.
-        # Pillow/Tkinter expects RGB.
         frame = cv2.cvtColor(
             frame,
             cv2.COLOR_BGR2RGB
         )
 
+        # Get actual available display size
+        width = self.display.winfo_width()
+        height = self.display.winfo_height()
+
+        if width <= 1 or height <= 1:
+            return
+
+        frame_height, frame_width = frame.shape[:2]
+
+        # Preserve camera aspect ratio
+        scale = min(
+            width / frame_width,
+            height / frame_height
+        )
+
+        new_width = max(
+            1,
+            int(frame_width * scale)
+        )
+
+        new_height = max(
+            1,
+            int(frame_height * scale)
+        )
+
         frame = cv2.resize(
             frame,
-            (PREVIEW_WIDTH, PREVIEW_HEIGHT)
+            (new_width, new_height)
         )
 
         image = Image.fromarray(frame)
@@ -112,72 +167,553 @@ class CameraPreview(tk.Frame):
             image=image
         )
 
-        # Keep a reference so Tkinter does not garbage collect it.
-        self.video_label.image = photo
+        self.display.image = photo
 
-        self.video_label.configure(
+        self.display.configure(
             image=photo
         )
 
 
 # ============================================================
-# Inspector Panel
+# ASSET BROWSER
 # ============================================================
 
-class InspectorPanel(tk.Frame):
+class AssetBrowser(tk.Frame):
 
     def __init__(self, parent):
+
         super().__init__(
             parent,
             bg=PANEL,
-            width=250
+            highlightbackground=BORDER,
+            highlightthickness=1
         )
 
-        self.pack_propagate(False)
+        self.images = []
+        self.thumbnail_images = []
 
-        title = tk.Label(
+        tk.Label(
             self,
-            text="Inspector",
+            text="Assets",
             bg=PANEL,
             fg=TEXT,
-            font=("Segoe UI", 12, "bold")
+            font=("Segoe UI", 11, "bold")
+        ).pack(
+            anchor="w",
+            padx=10,
+            pady=7
         )
 
-        title.pack(pady=10)
+        self.import_button = tk.Button(
+            self,
+            text="+ Import Images",
+            command=self.import_images,
+            bg=PANEL_LIGHT,
+            fg=TEXT,
+            activebackground=BORDER,
+            activeforeground=TEXT,
+            relief="flat"
+        )
+
+        self.import_button.pack(
+            fill="x",
+            padx=10,
+            pady=(0, 10)
+        )
+
+        # Container for thumbnails
+        self.thumbnail_frame = tk.Frame(
+            self,
+            bg=PANEL
+        )
+
+        self.thumbnail_frame.pack(
+            fill="both",
+            expand=True,
+            padx=5,
+            pady=5
+        )
+
+    def import_images(self):
+
+        files = filedialog.askopenfilenames(
+            title="Import Images",
+            filetypes=[
+                (
+                    "Image Files",
+                    "*.png *.jpg *.jpeg *.bmp *.webp"
+                )
+            ]
+        )
+
+        for file_path in files:
+            self.add_image(file_path)
+
+    def add_image(self, file_path):
+
+        try:
+
+            image = Image.open(file_path)
+            image.thumbnail((80, 80))
+
+            thumbnail = ImageTk.PhotoImage(image)
+
+            self.thumbnail_images.append(thumbnail)
+            self.images.append(file_path)
+
+            index = len(self.images) - 1
+
+            row = index // 2
+            column = index % 2
+
+            button = tk.Button(
+                self.thumbnail_frame,
+                image=thumbnail,
+                bg=PANEL_LIGHT,
+                activebackground=BORDER,
+                relief="flat"
+            )
+
+            button.grid(
+                row=row,
+                column=column,
+                padx=4,
+                pady=4
+            )
+
+        except Exception as error:
+
+            print(
+                "Could not load image:",
+                error
+            )
 
 
 # ============================================================
-# Timeline Panel
+# TOOLS PANEL
+# ============================================================
+
+class ToolPanel(tk.Frame):
+
+    def __init__(self, parent):
+
+        super().__init__(
+            parent,
+            bg=PANEL,
+            highlightbackground=BORDER,
+            highlightthickness=1
+        )
+
+        self.current_tool = "Select"
+
+        tk.Label(
+            self,
+            text="Tools",
+            bg=PANEL,
+            fg=TEXT,
+            font=("Segoe UI", 11, "bold")
+        ).pack(
+            anchor="w",
+            padx=10,
+            pady=7
+        )
+
+        tools = [
+            "Select",
+            "Move",
+            "Copy",
+            "Resize",
+            "Cut",
+            "Camera View"
+        ]
+
+        for tool in tools:
+
+            button = tk.Button(
+                self,
+                text=tool,
+                command=lambda t=tool: self.select_tool(t),
+                bg=PANEL_LIGHT,
+                fg=TEXT,
+                activebackground=BORDER,
+                activeforeground=TEXT,
+                relief="flat"
+            )
+
+            button.pack(
+                fill="x",
+                padx=10,
+                pady=3
+            )
+
+    def select_tool(self, tool):
+
+        self.current_tool = tool
+
+        print(
+            "Selected tool:",
+            tool
+        )
+
+
+# ============================================================
+# LAYER MODEL
+# ============================================================
+
+class Layer:
+
+    def __init__(self, name, image=None):
+
+        self.name = name
+        self.image = image
+
+        self.visible = True
+
+        self.x = 0
+        self.y = 0
+
+        self.scale = 1.0
+        self.opacity = 1.0
+
+
+# ============================================================
+# LAYERS PANEL
+# ============================================================
+
+class LayerPanel(tk.Frame):
+
+    def __init__(self, parent):
+
+        super().__init__(
+            parent,
+            bg=PANEL,
+            highlightbackground=BORDER,
+            highlightthickness=1
+        )
+
+        self.layers = []
+
+        tk.Label(
+            self,
+            text="Layers",
+            bg=PANEL,
+            fg=TEXT,
+            font=("Segoe UI", 11, "bold")
+        ).pack(
+            anchor="w",
+            padx=10,
+            pady=7
+        )
+
+        self.layer_list = tk.Listbox(
+            self,
+            bg="#181818",
+            fg=TEXT,
+            selectbackground="#094771",
+            selectforeground=TEXT,
+            borderwidth=0,
+            highlightthickness=0
+        )
+
+        self.layer_list.pack(
+            fill="both",
+            expand=True,
+            padx=8,
+            pady=5
+        )
+
+        controls = tk.Frame(
+            self,
+            bg=PANEL
+        )
+
+        controls.pack(
+            fill="x",
+            padx=8,
+            pady=8
+        )
+
+        tk.Button(
+            controls,
+            text="+",
+            width=3,
+            command=self.create_layer
+        ).pack(
+            side="left"
+        )
+
+        tk.Button(
+            controls,
+            text="-",
+            width=3,
+            command=self.delete_selected_layer
+        ).pack(
+            side="left",
+            padx=4
+        )
+
+        # Default layer structure from the sketch
+        self.add_layer("Foreground")
+        self.add_layer("Midground")
+        self.add_layer("Background")
+
+    def add_layer(self, name, image=None):
+
+        layer = Layer(
+            name,
+            image
+        )
+
+        # Insert new layers at top
+        self.layers.insert(
+            0,
+            layer
+        )
+
+        self.refresh()
+
+    def create_layer(self):
+
+        number = len(self.layers) + 1
+
+        self.add_layer(
+            f"Layer {number}"
+        )
+
+    def delete_selected_layer(self):
+
+        selection = self.layer_list.curselection()
+
+        if not selection:
+            return
+
+        index = selection[0]
+
+        del self.layers[index]
+
+        self.refresh()
+
+    def refresh(self):
+
+        self.layer_list.delete(
+            0,
+            tk.END
+        )
+
+        for layer in self.layers:
+
+            visibility = "●" if layer.visible else "○"
+
+            self.layer_list.insert(
+                tk.END,
+                f"{visibility}  {layer.name}"
+            )
+
+
+# ============================================================
+# TIMELINE PANEL
 # ============================================================
 
 class TimelinePanel(tk.Frame):
 
     def __init__(self, parent):
+
         super().__init__(
             parent,
             bg=PANEL,
-            height=150
+            highlightbackground=BORDER,
+            highlightthickness=1
         )
 
-        self.pack_propagate(False)
-
-        title = tk.Label(
+        header = tk.Frame(
             self,
+            bg=PANEL
+        )
+
+        header.pack(
+            fill="x"
+        )
+
+        tk.Label(
+            header,
             text="Timeline",
             bg=PANEL,
             fg=TEXT,
-            font=("Segoe UI", 12, "bold")
+            font=("Segoe UI", 11, "bold")
+        ).pack(
+            side="left",
+            padx=10,
+            pady=7
         )
 
-        title.pack(
-            anchor="w",
-            padx=10,
-            pady=10
+        self.canvas = tk.Canvas(
+            self,
+            bg="#181818",
+            highlightthickness=0
+        )
+
+        self.canvas.pack(
+            fill="both",
+            expand=True,
+            padx=5,
+            pady=(0, 5)
+        )
+
+        # Draw placeholder timeline tracks
+        self.canvas.create_line(
+            0,
+            35,
+            1000,
+            35,
+            fill=BORDER
+        )
+
+        self.canvas.create_line(
+            0,
+            70,
+            1000,
+            70,
+            fill=BORDER
+        )
+
+        self.canvas.create_line(
+            0,
+            105,
+            1000,
+            105,
+            fill=BORDER
         )
 
 
 # ============================================================
-# Main Application
+# WORKSPACE
+# ============================================================
+
+class Workspace(tk.Frame):
+
+    def __init__(self, parent):
+
+        super().__init__(
+            parent,
+            bg=BG
+        )
+
+        # Left column
+        self.grid_columnconfigure(
+            0,
+            weight=1,
+            minsize=220
+        )
+
+        # Main display / timeline
+        self.grid_columnconfigure(
+            1,
+            weight=4
+        )
+
+        # Layer panel
+        self.grid_columnconfigure(
+            2,
+            weight=1,
+            minsize=220
+        )
+
+        # Display row
+        self.grid_rowconfigure(
+            0,
+            weight=4
+        )
+
+        # Bottom editor row
+        self.grid_rowconfigure(
+            1,
+            weight=2
+        )
+
+        # --------------------------------
+        # Assets
+        # --------------------------------
+
+        self.assets = AssetBrowser(
+            self
+        )
+
+        self.assets.grid(
+            row=0,
+            column=0,
+            sticky="nsew",
+            padx=3,
+            pady=3
+        )
+
+        # --------------------------------
+        # Display
+        # --------------------------------
+
+        self.display = DisplayPanel(
+            self
+        )
+
+        self.display.grid(
+            row=0,
+            column=1,
+            columnspan=2,
+            sticky="nsew",
+            padx=3,
+            pady=3
+        )
+
+        # --------------------------------
+        # Tools
+        # --------------------------------
+
+        self.tools = ToolPanel(
+            self
+        )
+
+        self.tools.grid(
+            row=1,
+            column=0,
+            sticky="nsew",
+            padx=3,
+            pady=3
+        )
+
+        # --------------------------------
+        # Timeline
+        # --------------------------------
+
+        self.timeline = TimelinePanel(
+            self
+        )
+
+        self.timeline.grid(
+            row=1,
+            column=1,
+            sticky="nsew",
+            padx=3,
+            pady=3
+        )
+
+        # --------------------------------
+        # Layers
+        # --------------------------------
+
+        self.layers = LayerPanel(
+            self
+        )
+
+        self.layers.grid(
+            row=1,
+            column=2,
+            sticky="nsew",
+            padx=3,
+            pady=3
+        )
+
+
+# ============================================================
+# MAIN APPLICATION
 # ============================================================
 
 class CameraViewerApp:
@@ -186,21 +722,25 @@ class CameraViewerApp:
 
         self.root = root
 
-        self.root.title("Project Monday")
+        self.root.title(
+            "Project Monday"
+        )
 
         self.root.geometry(
             f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}"
         )
 
-        self.root.configure(bg=BG)
+        self.root.minsize(
+            900,
+            600
+        )
 
-        self.root.resizable(
-            True,
-            True
+        self.root.configure(
+            bg=BG
         )
 
         # --------------------------------
-        # Camera system
+        # Camera
         # --------------------------------
 
         self.camera_manager = CameraManager()
@@ -217,12 +757,20 @@ class CameraViewerApp:
         )
 
         # --------------------------------
-        # Build interface
+        # UI
         # --------------------------------
 
         self.create_menu()
-        self.create_main_area()
-        self.create_timeline()
+
+        self.workspace = Workspace(
+            self.root
+        )
+
+        self.workspace.pack(
+            fill="both",
+            expand=True
+        )
+
         self.create_status_bar()
 
         # --------------------------------
@@ -232,7 +780,7 @@ class CameraViewerApp:
         self.change_camera()
 
         # --------------------------------
-        # Window cleanup
+        # Cleanup
         # --------------------------------
 
         self.root.protocol(
@@ -240,42 +788,38 @@ class CameraViewerApp:
             self.on_close
         )
 
-        # Start preview loop
         self.update_frame()
 
     # ========================================================
-    # Menu
+    # MENU
     # ========================================================
 
     def create_menu(self):
 
-        self.menu_frame = tk.Frame(
+        menu_frame = tk.Frame(
             self.root,
             bg=PANEL,
-            height=40
+            height=42
         )
 
-        self.menu_frame.pack(
+        menu_frame.pack(
             fill="x"
         )
 
-        title = tk.Label(
-            self.menu_frame,
+        tk.Label(
+            menu_frame,
             text="Project Monday",
             bg=PANEL,
             fg=TEXT,
             font=("Segoe UI", 14, "bold")
-        )
-
-        title.pack(
+        ).pack(
             side="left",
-            padx=10
+            padx=12,
+            pady=7
         )
-
-        # Camera controls
 
         camera_frame = tk.Frame(
-            self.menu_frame,
+            menu_frame,
             bg=PANEL
         )
 
@@ -284,14 +828,12 @@ class CameraViewerApp:
             padx=10
         )
 
-        camera_label = tk.Label(
+        tk.Label(
             camera_frame,
             text="Camera:",
             bg=PANEL,
             fg=TEXT
-        )
-
-        camera_label.pack(
+        ).pack(
             side="left"
         )
 
@@ -314,160 +856,64 @@ class CameraViewerApp:
         )
 
     # ========================================================
-    # Main Workspace
-    # ========================================================
-
-    class Workspace(tk.Frame):
-
-        def __init__(self, parent):
-            super().__init__(parent, bg=BG)
-
-            # Make the center/display area expand the most
-            self.grid_columnconfigure(0, weight=1)
-            self.grid_columnconfigure(1, weight=4)
-            self.grid_columnconfigure(2, weight=1)
-
-            self.grid_rowconfigure(0, weight=4)
-            self.grid_rowconfigure(1, weight=2)
-
-            # -------------------------
-            # Asset Browser
-            # -------------------------
-
-            self.assets = AssetBrowser(self)
-
-            self.assets.grid(
-                row=0,
-                column=0,
-                sticky="nsew",
-                padx=4,
-                pady=4
-            )
-
-            # -------------------------
-            # Main Display
-            # -------------------------
-
-            self.display = DisplayPanel(self)
-
-            self.display.grid(
-                row=0,
-                column=1,
-                columnspan=2,
-                sticky="nsew",
-                padx=4,
-                pady=4
-            )
-
-            # -------------------------
-            # Tools
-            # -------------------------
-
-            self.tools = ToolPanel(self)
-
-            self.tools.grid(
-                row=1,
-                column=0,
-                sticky="nsew",
-                padx=4,
-                pady=4
-            )
-
-            # -------------------------
-            # Timeline
-            # -------------------------
-
-            self.timeline = TimelinePanel(self)
-
-            self.timeline.grid(
-                row=1,
-                column=1,
-                sticky="nsew",
-                padx=4,
-                pady=4
-            )
-
-            # -------------------------
-            # Layers
-            # -------------------------
-
-            self.layers = LayerPanel(self)
-
-            self.layers.grid(
-                row=1,
-                column=2,
-                sticky="nsew",
-                padx=4,
-                pady=4
-            )
-
-    # ========================================================
-    # Timeline
-    # ========================================================
-
-    def create_timeline(self):
-
-        self.timeline = TimelinePanel(
-            self.root
-        )
-
-        self.timeline.pack(
-            fill="x",
-            padx=5,
-            pady=5
-        )
-
-    # ========================================================
-    # Status Bar
+    # STATUS BAR
     # ========================================================
 
     def create_status_bar(self):
 
-        self.status_frame = tk.Frame(
+        status_frame = tk.Frame(
             self.root,
             bg=PANEL,
-            height=30
+            height=28
         )
 
-        self.status_frame.pack(
+        status_frame.pack(
             fill="x"
         )
 
         self.status_label = tk.Label(
-            self.status_frame,
+            status_frame,
             text="Status: Ready",
             bg=PANEL,
-            fg="lightgray"
+            fg=TEXT_DIM
         )
 
         self.status_label.pack(
             side="left",
-            padx=10
+            padx=10,
+            pady=4
         )
 
     # ========================================================
-    # Camera Control
+    # CAMERA
     # ========================================================
 
     def change_camera(self, event=None):
 
-        camera_index = self.selected_camera.get()
+        camera_index = (
+            self.selected_camera.get()
+        )
 
-        success = self.camera_manager.open_camera(
-            camera_index
+        success = (
+            self.camera_manager.open_camera(
+                camera_index
+            )
         )
 
         if success:
+
             self.set_status(
                 f"Camera {camera_index} connected"
             )
+
         else:
+
             self.set_status(
                 f"Unable to open camera {camera_index}"
             )
 
     # ========================================================
-    # Camera Update Loop
+    # UPDATE CAMERA
     # ========================================================
 
     def update_frame(self):
@@ -478,7 +924,10 @@ class CameraViewerApp:
 
         if ret:
 
-            self.preview.display_frame(
+            # IMPORTANT:
+            # Camera now goes to workspace.display,
+            # not self.preview.
+            self.workspace.display.display_frame(
                 frame
             )
 
@@ -488,7 +937,7 @@ class CameraViewerApp:
         )
 
     # ========================================================
-    # Status
+    # STATUS
     # ========================================================
 
     def set_status(self, message):
@@ -498,7 +947,7 @@ class CameraViewerApp:
         )
 
     # ========================================================
-    # Cleanup
+    # CLEANUP
     # ========================================================
 
     def on_close(self):
@@ -509,7 +958,7 @@ class CameraViewerApp:
 
 
 # ============================================================
-# Program Entry Point
+# MAIN
 # ============================================================
 
 def main():
