@@ -1,16 +1,12 @@
 import tkinter as tk
+from app import CameraViewerApp
 
-# Create the main window
-window = tk.Tk()
 
-# Window title
-window.title("Interpreter")
+def main():
+    root = tk.Tk()
+    CameraViewerApp(root)
+    root.mainloop()
 
-# Starting size
-window.geometry("800x600")
 
-# Allow resizing (enabled by default, but explicit here)
-window.resizable(True, True)
-
-# Start the application
-window.mainloop()
+if __name__ == "__main__":
+    main()
