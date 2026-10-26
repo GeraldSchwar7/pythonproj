@@ -1,7 +1,10 @@
 import tkinter as tk
 from tkinter import ttk
+
+import cv2
 from settings import BG, PANEL, TEXT, TEXT_DIM, WINDOW_WIDTH, WINDOW_HEIGHT
 from camera_manager import CameraManager
+from hand_tracker import HandTracker, HandMouseController
 from workspace import Workspace
 
 # ============================================================
@@ -36,6 +39,10 @@ class CameraViewerApp:
         # --------------------------------
 
         self.camera_manager = CameraManager()
+
+        self.hand_tracker = HandTracker()
+
+        self.hand_mouse = HandMouseController( smoothing=0.25)
 
         self.camera_list = (
             self.camera_manager.find_available_cameras()
@@ -210,24 +217,82 @@ class CameraViewerApp:
 
     def update_frame(self):
 
-        ret, frame = (
-            self.camera_manager.read_frame()
-        )
+        # ========================================
+        # READ CAMERA
+        # ========================================
 
-        if ret:
+        ret, frame = self.camera_manager.read_frame()
+
+        if not ret or frame is None:
+            self.set_status("Camera frame unavailable")
+            self.root.after(30, self.update_frame)
+            return
+
+        # Mirror the camera
+        frame = cv2.flip(frame, 1)
+
+        # ========================================
+        # HAND TRACKING
+        # ========================================
+
+        try:
+
+            self.hand_tracker.process(frame)
+
+            index_finger = (
+                self.hand_tracker.get_index_finger(frame)
+            )
+
+            if index_finger is not None:
+
+                x, y = index_finger
+
+                height, width = frame.shape[:2]
+
+                self.hand_mouse.move(
+                    x,
+                    y,
+                    width,
+                    height
+                )
+
+            frame = self.hand_tracker.draw(frame)
+
+        except Exception as error:
 
             # IMPORTANT:
-            # Camera now goes to workspace.display,
-            # not self.preview.
+            # Hand tracking can fail without stopping
+            # the camera feed.
+            print(
+                "Hand tracking error:",
+                error
+            )
+
+        # ========================================
+        # DISPLAY CAMERA
+        # ========================================
+
+        try:
+
             self.workspace.display.display_frame(
                 frame
             )
+
+        except Exception as error:
+
+            print(
+                "Display error:",
+                error
+            )
+
+        # ========================================
+        # NEXT FRAME
+        # ========================================
 
         self.root.after(
             15,
             self.update_frame
         )
-
     # ========================================================
     # STATUS
     # ========================================================
@@ -245,5 +310,7 @@ class CameraViewerApp:
     def on_close(self):
 
         self.camera_manager.release()
+
+        self.hand_tracker.close()
 
         self.root.destroy()
