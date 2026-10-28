@@ -16,7 +16,3 @@ class Layer:
 
         self.scale = 1.0
         self.opacity = 1.0
-
-        self.clips = []
-        
-

@@ -104,73 +104,35 @@ class DisplayPanel(tk.Frame):
     # --------------------------------------------------------
 
     def _create_viewport_tab(self):
-        self.viewport_canvas = tk.Canvas(
+        # This is intentionally a separate surface from the camera feed.
+        # Future viewport/rendering tools can be added here without
+        # changing the camera code.
+        self.viewport_display = tk.Frame(
             self.viewport_tab,
-            bg="#181818",
-            highlightthickness=0
+            bg="#181818"
         )
-        self.viewport_canvas.pack(fill="both", expand=True, padx=5, pady=5)
-        self.viewport_canvas.bind("<Configure>", lambda event: self.render_viewport())
-        self.viewport_layers = []
-        self.viewport_photos = []
+        self.viewport_display.pack(
+            fill="both",
+            expand=True,
+            padx=5,
+            pady=5
+        )
 
-    def set_viewport_layers(self, layers):
-        self.viewport_layers = layers
-        self.render_viewport()
+        tk.Label(
+            self.viewport_display,
+            text="Viewport",
+            bg="#181818",
+            fg=TEXT_DIM,
+            font=("Segoe UI", 16, "bold")
+        ).place(relx=0.5, rely=0.46, anchor="center")
 
-    def render_viewport(self):
-        if not hasattr(self, "viewport_canvas"):
-            return
-
-        self.viewport_canvas.delete("all")
-        self.viewport_photos.clear()
-        width = self.viewport_canvas.winfo_width()
-        height = self.viewport_canvas.winfo_height()
-        if width <= 1 or height <= 1:
-            return
-
-        visible_media = [
-            layer for layer in reversed(self.viewport_layers)
-            if layer.visible and layer.image
-        ]
-
-        if not visible_media:
-            self.viewport_canvas.create_text(
-                width / 2, height / 2,
-                text="Drag an asset onto a timeline track\nto add it to the viewport.",
-                fill=TEXT_DIM,
-                font=("Segoe UI", 12),
-                justify="center"
-            )
-            return
-
-        for layer in visible_media:
-            try:
-                image = Image.open(layer.image).convert("RGBA")
-                image_width, image_height = image.size
-                scale = min(width / image_width, height / image_height) * layer.scale
-                new_size = (
-                    max(1, int(image_width * scale)),
-                    max(1, int(image_height * scale))
-                )
-                image = image.resize(new_size, Image.Resampling.LANCZOS)
-
-                if layer.opacity < 1.0:
-                    alpha = image.getchannel("A").point(
-                        lambda value: int(value * layer.opacity)
-                    )
-                    image.putalpha(alpha)
-
-                photo = ImageTk.PhotoImage(image)
-                self.viewport_photos.append(photo)
-                self.viewport_canvas.create_image(
-                    width / 2 + layer.x,
-                    height / 2 + layer.y,
-                    image=photo,
-                    anchor="center"
-                )
-            except Exception as error:
-                print("Could not render viewport layer:", error)
+        tk.Label(
+            self.viewport_display,
+            text="Viewport content will appear here.",
+            bg="#181818",
+            fg=TEXT_DIM,
+            font=("Segoe UI", 10)
+        ).place(relx=0.5, rely=0.53, anchor="center")
 
     # --------------------------------------------------------
     # POP OUT / ADD BACK
