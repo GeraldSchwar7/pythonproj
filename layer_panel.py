@@ -1,12 +1,22 @@
 import tkinter as tk
 
-from settings import PANEL, PANEL_LIGHT, BORDER, TEXT
+from settings import (
+    PANEL,
+    PANEL_LIGHT,
+    BORDER,
+    TEXT
+)
+
 from layer import Layer
 
 
 class LayerPanel(tk.Frame):
 
-    def __init__(self, parent, on_layers_changed=None):
+    def __init__(
+        self,
+        parent,
+        on_layers_changed=None
+    ):
 
         super().__init__(
             parent,
@@ -15,30 +25,39 @@ class LayerPanel(tk.Frame):
             highlightthickness=1
         )
 
+        # ==================================================
+        # DATA
+        # ==================================================
+
         self.layers = []
 
-        # Callback used to tell Workspace that layers changed.
-        self.on_layers_changed = on_layers_changed
+        self.on_layers_changed = (
+            on_layers_changed
+        )
 
-        # --------------------------------------------------
+        # ==================================================
         # TITLE
-        # --------------------------------------------------
+        # ==================================================
 
         tk.Label(
             self,
             text="Layers",
             bg=PANEL,
             fg=TEXT,
-            font=("Segoe UI", 11, "bold")
+            font=(
+                "Segoe UI",
+                11,
+                "bold"
+            )
         ).pack(
             anchor="w",
             padx=10,
             pady=7
         )
 
-        # --------------------------------------------------
+        # ==================================================
         # LAYER LIST
-        # --------------------------------------------------
+        # ==================================================
 
         self.layer_list = tk.Listbox(
             self,
@@ -57,16 +76,15 @@ class LayerPanel(tk.Frame):
             pady=5
         )
 
-        # NEW:
-        # Double-click a layer to rename it.
+        # Double-click to rename.
         self.layer_list.bind(
             "<Double-Button-1>",
             self.rename_selected_layer
         )
 
-        # --------------------------------------------------
+        # ==================================================
         # CONTROLS
-        # --------------------------------------------------
+        # ==================================================
 
         controls = tk.Frame(
             self,
@@ -79,52 +97,85 @@ class LayerPanel(tk.Frame):
             pady=8
         )
 
+        # Add
         tk.Button(
             controls,
             text="+",
             width=3,
-            command=self.create_layer
+            command=self.create_layer,
+            bg=PANEL_LIGHT,
+            fg=TEXT,
+            activebackground=BORDER,
+            activeforeground=TEXT,
+            relief="flat"
         ).pack(
             side="left"
         )
 
+        # Delete
         tk.Button(
             controls,
             text="-",
             width=3,
-            command=self.delete_selected_layer
+            command=self.delete_selected_layer,
+            bg=PANEL_LIGHT,
+            fg=TEXT,
+            activebackground=BORDER,
+            activeforeground=TEXT,
+            relief="flat"
         ).pack(
             side="left",
             padx=4
         )
 
-        # Optional explicit rename button
+        # Rename
         tk.Button(
             controls,
             text="Rename",
-            command=self.rename_selected_layer
+            command=self.rename_selected_layer,
+            bg=PANEL_LIGHT,
+            fg=TEXT,
+            activebackground=BORDER,
+            activeforeground=TEXT,
+            relief="flat"
         ).pack(
             side="left",
             padx=4
         )
 
-        # --------------------------------------------------
+        # ==================================================
         # DEFAULT LAYERS
-        # --------------------------------------------------
+        # ==================================================
 
-        self.add_layer("Foreground")
-        self.add_layer("Midground")
-        self.add_layer("Background")
+        self.add_layer(
+            "Foreground",
+            notify=False
+        )
+
+        self.add_layer(
+            "Midground",
+            notify=False
+        )
+
+        self.add_layer(
+            "Background",
+            notify=False
+        )
+
+        self.notify_layers_changed()
 
     # ======================================================
     # ADD LAYER
     # ======================================================
 
-    def add_layer(self, name, image=None):
+    def add_layer(
+        self,
+        name,
+        notify=True
+    ):
 
         layer = Layer(
-            name,
-            image
+            name
         )
 
         # New layers appear at the top.
@@ -134,7 +185,11 @@ class LayerPanel(tk.Frame):
         )
 
         self.refresh()
-        self.notify_layers_changed()
+
+        if notify:
+            self.notify_layers_changed()
+
+        return layer
 
     # ======================================================
     # CREATE LAYER
@@ -142,7 +197,10 @@ class LayerPanel(tk.Frame):
 
     def create_layer(self):
 
-        number = len(self.layers) + 1
+        number = (
+            len(self.layers)
+            + 1
+        )
 
         self.add_layer(
             f"Layer {number}"
@@ -154,7 +212,9 @@ class LayerPanel(tk.Frame):
 
     def delete_selected_layer(self):
 
-        selection = self.layer_list.curselection()
+        selection = (
+            self.layer_list.curselection()
+        )
 
         if not selection:
             return
@@ -164,15 +224,21 @@ class LayerPanel(tk.Frame):
         del self.layers[index]
 
         self.refresh()
+
         self.notify_layers_changed()
 
     # ======================================================
     # RENAME LAYER
     # ======================================================
 
-    def rename_selected_layer(self, event=None):
+    def rename_selected_layer(
+        self,
+        event=None
+    ):
 
-        selection = self.layer_list.curselection()
+        selection = (
+            self.layer_list.curselection()
+        )
 
         if not selection:
             return
@@ -181,18 +247,18 @@ class LayerPanel(tk.Frame):
 
         layer = self.layers[index]
 
-        # Find where the selected layer is located
-        # inside the Listbox.
-        bbox = self.layer_list.bbox(index)
+        bbox = self.layer_list.bbox(
+            index
+        )
 
         if bbox is None:
             return
 
         x, y, width, height = bbox
 
-        # --------------------------------------------------
-        # Temporary rename text field
-        # --------------------------------------------------
+        # ==================================================
+        # RENAME ENTRY
+        # ==================================================
 
         rename_entry = tk.Entry(
             self.layer_list,
@@ -202,69 +268,115 @@ class LayerPanel(tk.Frame):
             relief="flat"
         )
 
-        # Start with the current layer name.
         rename_entry.insert(
             0,
             layer.name
         )
 
-        # Put the Entry over the Listbox row.
         rename_entry.place(
             x=25,
             y=y,
             width=max(
                 50,
-                self.layer_list.winfo_width() - 30
+                self.layer_list.winfo_width()
+                - 30
             ),
             height=height
         )
 
         rename_entry.focus_set()
 
-        # Highlight the existing name so typing
-        # immediately replaces it.
         rename_entry.select_range(
             0,
             tk.END
         )
 
-        # --------------------------------------------------
-        # Finish rename
-        # --------------------------------------------------
+        rename_finished = False
 
-        def finish_rename(event=None):
+        # ==================================================
+        # FINISH
+        # ==================================================
 
-            new_name = rename_entry.get().strip()
+        def finish_rename(
+            event=None
+        ):
+
+            nonlocal rename_finished
+
+            if rename_finished:
+                return
+
+            rename_finished = True
+
+            new_name = (
+                rename_entry
+                .get()
+                .strip()
+            )
 
             if new_name:
-                layer.name = new_name
+
+                layer.name = (
+                    new_name
+                )
 
             rename_entry.destroy()
 
-            # Update Layers panel.
             self.refresh()
 
-            # Tell Timeline/Workspace that the
-            # layer information changed.
             self.notify_layers_changed()
 
-        # Enter accepts the new name.
+        # ==================================================
+        # CANCEL
+        # ==================================================
+
+        def cancel_rename(
+            event=None
+        ):
+
+            nonlocal rename_finished
+
+            if rename_finished:
+                return
+
+            rename_finished = True
+
+            rename_entry.destroy()
+
+            self.refresh()
+
         rename_entry.bind(
             "<Return>",
             finish_rename
         )
 
-        # Clicking somewhere else also accepts it.
         rename_entry.bind(
             "<FocusOut>",
             finish_rename
         )
 
+        rename_entry.bind(
+            "<Escape>",
+            cancel_rename
+        )
+
     # ======================================================
-    # REFRESH DISPLAY
+    # REFRESH
     # ======================================================
 
     def refresh(self):
+
+        selection = (
+            self.layer_list.curselection()
+        )
+
+        selected_index = None
+
+        if selection:
+
+            selected_index = (
+                selection[0]
+            )
 
         self.layer_list.delete(
             0,
@@ -284,13 +396,32 @@ class LayerPanel(tk.Frame):
                 f"{visibility}  {layer.name}"
             )
 
+        # Restore previous selection.
+        if (
+            selected_index
+            is not None
+            and selected_index
+            < len(self.layers)
+        ):
+
+            self.layer_list.selection_set(
+                selected_index
+            )
+
+            self.layer_list.activate(
+                selected_index
+            )
+
     # ======================================================
     # NOTIFY WORKSPACE
     # ======================================================
 
     def notify_layers_changed(self):
 
-        if self.on_layers_changed is not None:
+        if (
+            self.on_layers_changed
+            is not None
+        ):
 
             self.on_layers_changed(
                 self.layers
