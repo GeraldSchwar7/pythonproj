@@ -99,7 +99,10 @@ class Workspace(tk.Frame):
                 self._on_clip_added,
 
             on_time_changed=
-                self._on_time_changed
+                self._on_time_changed,
+
+            on_timeline_changed=
+                self._on_timeline_changed
         )
 
         self.timeline.grid(
@@ -261,3 +264,22 @@ class Workspace(tk.Frame):
         self.display.set_viewport_time(
             current_time
         )
+
+# ======================================================
+# TIMELINE ARRANGEMENT CHANGED
+# ======================================================
+
+    def _on_timeline_changed(
+    self
+):
+
+    # Refresh the viewport using the current
+    # timeline arrangement.
+
+        self.display.set_viewport_layers(
+            self.layers.layers
+    )
+
+        self.display.set_viewport_time(
+            self.timeline.current_time
+    )
