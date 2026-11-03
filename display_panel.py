@@ -38,6 +38,18 @@ class DisplayPanel(tk.Frame):
         )
 
         # ==================================================
+        # VIEWPORT RENDER SCHEDULING
+        # ==================================================
+
+        self.pending_viewport_time = 4.0
+
+        self.viewport_render_job = None
+
+        # About 30 FPS.
+        self.viewport_frame_delay = 20
+
+
+        # ==================================================
         # CAMERA WINDOW
         # ==================================================
 
@@ -250,6 +262,16 @@ class DisplayPanel(tk.Frame):
         self,
         project_time
     ):
+        self.pending_viewport_time = max(
+            0.0,
+            float(project_time)
+        )
+
+        if (self.viewport_render_job is not None):
+            return
+        
+        self.viewport_render_job = (
+        self.after(self.viewport_frame_delay, self._render_pending_viewport))
 
         self.viewport_time = max(
             0.0,
@@ -258,6 +280,15 @@ class DisplayPanel(tk.Frame):
 
         self.render_viewport()
 
+    def _render_pending_viewport(self):
+
+    # Allow another render to be scheduled.
+        self.viewport_render_job = None
+
+    # Render the newest requested time.
+        self.viewport_time = (self.pending_viewport_time)
+
+        self.render_viewport()
     # ======================================================
     # GET VIDEO FRAME
     # ======================================================

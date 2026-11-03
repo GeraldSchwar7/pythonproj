@@ -191,8 +191,9 @@ class TimelinePanel(tk.Frame):
 
     def _mouse_dragged(self, event):
  
-        if self.is_dragging_playhead:timeline_x = (self.canvas.canvasx(event.x))
-        self._update_playhead_from_x(timeline_x)
+        if self.is_dragging_playhead:
+            timeline_x = (self.canvas.canvasx(event.x))
+            self._update_playhead_from_x(timeline_x)
 
         if not self.is_dragging_clip or self.dragged_clip is None:
             return
