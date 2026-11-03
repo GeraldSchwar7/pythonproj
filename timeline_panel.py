@@ -23,6 +23,11 @@ class TimelinePanel(tk.Frame):
         self.dragged_clip_layer = None
         self.drag_offset_time = 0.0
         self.is_dragging_clip = False
+        self.is_dragging_playhead = False
+
+        # How close the mouse needs to be to the playhead
+        # to grab it.
+        self.playhead_grab_width = 8
 
         header = tk.Frame(self, bg=PANEL)
         header.pack(fill="x")
@@ -118,8 +123,15 @@ class TimelinePanel(tk.Frame):
     def _mouse_pressed(self, event):
         timeline_x = self.canvas.canvasx(event.x)
         timeline_y = self.canvas.canvasy(event.y)
-        layer, clip = self._find_clip_at_position(timeline_x, timeline_y)
 
+        playhead_x = (self.current_time* self.pixels_per_second)
+        distance_from_playhead = abs(timeline_x - playhead_x)
+        if ( distance_from_playhead<= self.playhead_grab_width or timeline_y <= self.RULER_HEIGHT):
+            self.is_dragging_playhead = True
+            self._update_playhead_from_x(timeline_x)
+            return
+
+        layer, clip = self._find_clip_at_position(timeline_x, timeline_y)
         if clip is not None:
             self.dragged_clip = clip
             self.dragged_clip_layer = layer
@@ -130,7 +142,58 @@ class TimelinePanel(tk.Frame):
 
         self.set_current_time(timeline_x / self.pixels_per_second)
 
+    def _move_playhead_visual(self):
+
+        x = (
+            self.current_time
+            * self.pixels_per_second
+        )
+
+        timeline_height = max(self.canvas.winfo_height(),
+            self.RULER_HEIGHT
+            + len(self.layers)
+            * self.TRACK_HEIGHT
+        )
+
+    # Remove only the old playhead.
+        self.canvas.delete(
+            "playhead"
+        )
+
+    # Draw line.
+        self.canvas.create_line(x,0,x,timeline_height,
+            fill="#ff4040",
+            width=2,
+            tags="playhead"
+        )
+
+    # Draw triangle.
+        self.canvas.create_polygon(x - 6,0,x + 6,0,x,9,
+            fill="#ff4040",
+            outline="",
+            tags="playhead"
+        )
+    # Keep playhead above clips.
+        self.canvas.tag_raise("playhead")
+
+    def _update_playhead_from_x(self,timeline_x):
+        new_time = (timeline_x/self.pixels_per_second)
+        new_time = max(0.0,min(new_time,self.timeline_duration))
+        self.current_time = new_time
+        self.time_label.configure(text=self._format_time(self.current_time,hundredths=True))
+
+    # Move only the playhead.
+        self._move_playhead_visual()
+
+    # Update viewport.
+        if (self.on_time_changed is not None):
+            self.on_time_changed(self.current_time)
+
     def _mouse_dragged(self, event):
+ 
+        if self.is_dragging_playhead:timeline_x = (self.canvas.canvasx(event.x))
+        self._update_playhead_from_x(timeline_x)
+
         if not self.is_dragging_clip or self.dragged_clip is None:
             return
 
@@ -158,6 +221,11 @@ class TimelinePanel(tk.Frame):
         self.redraw()
 
     def _mouse_released(self, event):
+
+        if self.is_dragging_playhead:
+            self.is_dragging_playhead = False 
+            return
+       
         if not self.is_dragging_clip:
             return
 
@@ -177,12 +245,14 @@ class TimelinePanel(tk.Frame):
         self.canvas.configure(cursor="fleur" if clip is not None else "")
 
     def set_current_time(self, value):
+        
         self.current_time = max(0.0, min(float(value), self.timeline_duration))
         self.time_label.configure(text=self._format_time(self.current_time, hundredths=True))
-        self.redraw()
+
 
         if self.on_time_changed is not None:
             self.on_time_changed(self.current_time)
+        
 
     def zoom_in(self):
         self._set_zoom(min(400.0, self.pixels_per_second * 1.25))
@@ -299,13 +369,14 @@ class TimelinePanel(tk.Frame):
 
     def _draw_playhead(self, height):
         x = self.current_time * self.pixels_per_second
-        self.canvas.create_line(x, 0, x, height, fill="#ff4040", width=2)
+        self.canvas.create_line(x, 0, x, height, fill="#ff4040", width=2, tags="playhead")
         self.canvas.create_polygon(
             x - 6, 0,
             x + 6, 0,
             x, 9,
             fill="#ff4040",
-            outline=""
+            outline="",
+            tags="playhead"
         )
 
     @staticmethod
