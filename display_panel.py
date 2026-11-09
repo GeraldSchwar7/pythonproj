@@ -12,9 +12,13 @@ from PIL import (
 from settings import (
     PANEL,
     PANEL_LIGHT,
+    PANEL_HOVER,
+    PANEL_DEEP,
     BORDER,
     TEXT,
-    TEXT_DIM
+    TEXT_DIM,
+    FONT,
+    flat_button
 )
 
 
@@ -84,12 +88,12 @@ class DisplayPanel(tk.Frame):
 
         tk.Label(
             title_bar,
-            text="Display",
+            text="PROGRAM MONITOR",
             bg=PANEL,
-            fg=TEXT,
+            fg=TEXT_DIM,
             font=(
                 "Segoe UI",
-                11,
+                9,
                 "bold"
             )
         ).pack(
@@ -158,17 +162,8 @@ class DisplayPanel(tk.Frame):
             pady=5
         )
 
-        self.pop_out_button = (
-            tk.Button(
-                controls,
-                text="Pop Out Camera View",
-                command=self.pop_out_camera,
-                bg=PANEL_LIGHT,
-                fg=TEXT,
-                activebackground=BORDER,
-                activeforeground=TEXT,
-                relief="flat"
-            )
+        self.pop_out_button = flat_button(
+            controls, "↗  Pop Out", self.pop_out_camera
         )
 
         self.pop_out_button.pack(
@@ -210,7 +205,7 @@ class DisplayPanel(tk.Frame):
         self.viewport_canvas = (
             tk.Canvas(
                 self.viewport_tab,
-                bg="#181818",
+                bg=PANEL_DEEP,
                 highlightthickness=0
             )
         )
@@ -706,7 +701,7 @@ class DisplayPanel(tk.Frame):
             command=self.add_camera_back,
             bg=PANEL_LIGHT,
             fg=TEXT,
-            activebackground=BORDER,
+            activebackground=PANEL_HOVER,
             activeforeground=TEXT,
             relief="flat"
         ).pack(

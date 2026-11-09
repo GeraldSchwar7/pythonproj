@@ -84,8 +84,8 @@ class Workspace(tk.Frame):
             column=1,
             columnspan=2,
             sticky="nsew",
-            padx=3,
-            pady=3
+            padx=5,
+            pady=5
         )
 
         # ==================================================
@@ -109,8 +109,8 @@ class Workspace(tk.Frame):
             row=1,
             column=1,
             sticky="nsew",
-            padx=3,
-            pady=3
+            padx=5,
+            pady=5
         )
 
         # ==================================================
@@ -128,8 +128,8 @@ class Workspace(tk.Frame):
             row=1,
             column=2,
             sticky="nsew",
-            padx=3,
-            pady=3
+            padx=5,
+            pady=5
         )
 
         # ==================================================
@@ -147,8 +147,8 @@ class Workspace(tk.Frame):
             row=0,
             column=0,
             sticky="nsew",
-            padx=3,
-            pady=3
+            padx=5,
+            pady=5
         )
 
         # ==================================================
@@ -163,8 +163,8 @@ class Workspace(tk.Frame):
             row=1,
             column=0,
             sticky="nsew",
-            padx=3,
-            pady=3
+            padx=5,
+            pady=5
         )
 
         # ==================================================

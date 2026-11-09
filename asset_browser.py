@@ -13,8 +13,12 @@ from PIL import (
 from settings import (
     PANEL,
     PANEL_LIGHT,
+    PANEL_HOVER,
     BORDER,
-    TEXT
+    TEXT,
+    TEXT_DIM,
+    FONT,
+    flat_button
 )
 
 from media_clip import (
@@ -60,12 +64,12 @@ class AssetBrowser(tk.Frame):
 
         tk.Label(
             self,
-            text="Assets",
+            text="ASSETS",
             bg=PANEL,
-            fg=TEXT,
+            fg=TEXT_DIM,
             font=(
                 "Segoe UI",
-                11,
+                9,
                 "bold"
             )
         ).pack(
@@ -78,15 +82,11 @@ class AssetBrowser(tk.Frame):
         # IMPORT BUTTON
         # ==================================================
 
-        self.import_button = tk.Button(
+        self.import_button = flat_button(
             self,
-            text="+ Import Media",
-            command=self.import_media,
-            bg=PANEL_LIGHT,
-            fg=TEXT,
-            activebackground=BORDER,
-            activeforeground=TEXT,
-            relief="flat"
+            "+  Import Media",
+            self.import_media,
+            accent=True
         )
 
         self.import_button.pack(
@@ -234,7 +234,7 @@ class AssetBrowser(tk.Frame):
                 cell,
                 image=thumbnail,
                 bg=PANEL_LIGHT,
-                activebackground=BORDER,
+                activebackground=PANEL_HOVER,
                 relief="flat",
                 cursor="hand2"
             )

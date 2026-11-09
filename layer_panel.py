@@ -3,8 +3,14 @@ import tkinter as tk
 from settings import (
     PANEL,
     PANEL_LIGHT,
+    PANEL_HOVER,
     BORDER,
-    TEXT
+    TEXT,
+    TEXT_DIM,
+    ACCENT_SOFT,
+    FONT,
+    panel_title,
+    flat_button
 )
 
 from layer import Layer
@@ -41,12 +47,12 @@ class LayerPanel(tk.Frame):
 
         tk.Label(
             self,
-            text="Layers",
+            text="LAYERS",
             bg=PANEL,
-            fg=TEXT,
+            fg=TEXT_DIM,
             font=(
                 "Segoe UI",
-                11,
+                9,
                 "bold"
             )
         ).pack(
@@ -61,12 +67,14 @@ class LayerPanel(tk.Frame):
 
         self.layer_list = tk.Listbox(
             self,
-            bg="#181818",
+            bg="#101216",
             fg=TEXT,
-            selectbackground="#094771",
+            selectbackground=ACCENT_SOFT,
             selectforeground=TEXT,
             borderwidth=0,
-            highlightthickness=0
+            highlightthickness=0,
+            font=(FONT, 10),
+            activestyle="none"
         )
 
         self.layer_list.pack(
@@ -105,7 +113,7 @@ class LayerPanel(tk.Frame):
             command=self.create_layer,
             bg=PANEL_LIGHT,
             fg=TEXT,
-            activebackground=BORDER,
+            activebackground=PANEL_HOVER,
             activeforeground=TEXT,
             relief="flat"
         ).pack(
@@ -120,7 +128,7 @@ class LayerPanel(tk.Frame):
             command=self.delete_selected_layer,
             bg=PANEL_LIGHT,
             fg=TEXT,
-            activebackground=BORDER,
+            activebackground=PANEL_HOVER,
             activeforeground=TEXT,
             relief="flat"
         ).pack(
@@ -135,7 +143,7 @@ class LayerPanel(tk.Frame):
             command=self.rename_selected_layer,
             bg=PANEL_LIGHT,
             fg=TEXT,
-            activebackground=BORDER,
+            activebackground=PANEL_HOVER,
             activeforeground=TEXT,
             relief="flat"
         ).pack(
