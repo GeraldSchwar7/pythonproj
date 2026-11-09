@@ -2,7 +2,8 @@ import tkinter as tk
 from tkinter import ttk
 
 import cv2
-from settings import BG, PANEL, TEXT, TEXT_DIM, WINDOW_WIDTH, WINDOW_HEIGHT
+from settings import (BG, PANEL, PANEL_LIGHT, BORDER, TEXT, TEXT_DIM, ACCENT, FONT,
+                      WINDOW_WIDTH, WINDOW_HEIGHT, configure_ttk)
 from camera_manager import CameraManager
 from hand_tracker import HandTracker, HandMouseController
 from workspace import Workspace
@@ -34,6 +35,8 @@ class CameraViewerApp:
             bg=BG
         )
 
+        configure_ttk(self.root)
+
         # --------------------------------
         # Camera
         # --------------------------------
@@ -42,7 +45,7 @@ class CameraViewerApp:
 
         self.hand_tracker = HandTracker()
 
-        self.hand_mouse = HandMouseController( smoothing=0.25)
+        self.hand_mouse = HandMouseController(smoothing=0.75)
 
         self.camera_list = (
             self.camera_manager.find_available_cameras()
@@ -98,61 +101,48 @@ class CameraViewerApp:
         menu_frame = tk.Frame(
             self.root,
             bg=PANEL,
-            height=42
+            height=58,
+            highlightbackground=BORDER,
+            highlightthickness=1
         )
+        menu_frame.pack(fill="x")
+        menu_frame.pack_propagate(False)
 
-        menu_frame.pack(
-            fill="x"
-        )
-
-        tk.Label(
-            menu_frame,
-            text="Project Monday",
-            bg=PANEL,
-            fg=TEXT,
-            font=("Segoe UI", 14, "bold")
-        ).pack(
-            side="left",
-            padx=12,
-            pady=7
-        )
-
-        camera_frame = tk.Frame(
-            menu_frame,
-            bg=PANEL
-        )
-
-        camera_frame.pack(
-            side="right",
-            padx=10
-        )
+        brand = tk.Frame(menu_frame, bg=PANEL)
+        brand.pack(side="left", padx=16, fill="y")
 
         tk.Label(
-            camera_frame,
-            text="Camera:",
-            bg=PANEL,
-            fg=TEXT
-        ).pack(
-            side="left"
-        )
+            brand, text="PROJECT", bg=PANEL, fg=TEXT_DIM,
+            font=(FONT, 8, "bold")
+        ).pack(anchor="w", pady=(9, 0))
+
+        tk.Label(
+            brand, text="MONDAY", bg=PANEL, fg=TEXT,
+            font=(FONT, 15, "bold")
+        ).pack(anchor="w", pady=(0, 7))
+
+        separator = tk.Frame(menu_frame, bg=ACCENT, width=3)
+        separator.pack(side="left", fill="y", pady=12)
+
+        tk.Label(
+            menu_frame, text="Gesture Video Workspace", bg=PANEL, fg=TEXT_DIM,
+            font=(FONT, 9)
+        ).pack(side="left", padx=12)
+
+        camera_frame = tk.Frame(menu_frame, bg=PANEL)
+        camera_frame.pack(side="right", padx=16)
+
+        tk.Label(
+            camera_frame, text="CAMERA", bg=PANEL, fg=TEXT_DIM,
+            font=(FONT, 8, "bold")
+        ).pack(side="left", padx=(0, 8))
 
         self.camera_dropdown = ttk.Combobox(
-            camera_frame,
-            textvariable=self.selected_camera,
-            values=self.camera_list,
-            state="readonly",
-            width=5
+            camera_frame, textvariable=self.selected_camera,
+            values=self.camera_list, state="readonly", width=6
         )
-
-        self.camera_dropdown.pack(
-            side="left",
-            padx=5
-        )
-
-        self.camera_dropdown.bind(
-            "<<ComboboxSelected>>",
-            self.change_camera
-        )
+        self.camera_dropdown.pack(side="left")
+        self.camera_dropdown.bind("<<ComboboxSelected>>", self.change_camera)
 
     # ========================================================
     # STATUS BAR
@@ -163,25 +153,37 @@ class CameraViewerApp:
         status_frame = tk.Frame(
             self.root,
             bg=PANEL,
-            height=28
+            height=30,
+            highlightbackground=BORDER,
+            highlightthickness=1
         )
 
         status_frame.pack(
             fill="x"
         )
 
+        tk.Label(
+            status_frame, text="●", bg=PANEL, fg="#48c78e",
+            font=(FONT, 8)
+        ).pack(side="left", padx=(14, 5), pady=5)
+
         self.status_label = tk.Label(
             status_frame,
             text="Status: Ready",
             bg=PANEL,
-            fg=TEXT_DIM
+            fg=TEXT_DIM,
+            font=(FONT, 9)
         )
 
         self.status_label.pack(
             side="left",
-            padx=10,
-            pady=4
+            pady=5
         )
+
+        tk.Label(
+            status_frame, text="HAND CONTROL  •  PINCH TO CLICK",
+            bg=PANEL, fg=TEXT_DIM, font=(FONT, 8, "bold")
+        ).pack(side="right", padx=14, pady=5)
 
     # ========================================================
     # CAMERA

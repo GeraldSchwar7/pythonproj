@@ -1,5 +1,7 @@
 import tkinter as tk
-from settings import PANEL, PANEL_LIGHT, BORDER, TEXT, TEXT_DIM
+from settings import (PANEL, PANEL_LIGHT, PANEL_HOVER, PANEL_DEEP, BORDER, TEXT, TEXT_DIM,
+                      TEXT_MUTED, ACCENT, PLAYHEAD, TRACK_A, TRACK_B, VIDEO_CLIP,
+                      IMAGE_CLIP, FONT, flat_button)
 from media_clip import MediaClip
 
 
@@ -32,23 +34,25 @@ class TimelinePanel(tk.Frame):
         header = tk.Frame(self, bg=PANEL)
         header.pack(fill="x")
 
-        tk.Label(header, text="Timeline", bg=PANEL, fg=TEXT,
-                 font=("Segoe UI", 11, "bold")).pack(side="left", padx=10, pady=7)
+        tk.Label(header, text="TIMELINE", bg=PANEL, fg=TEXT_DIM,
+                 font=(FONT, 9, "bold")).pack(side="left", padx=(12, 8), pady=10)
 
-        self.time_label = tk.Label(header, text="00:00.00", bg=PANEL, fg=TEXT_DIM)
+        self.time_label = tk.Label(header, text="00:00.00", bg=PANEL_DEEP, fg=TEXT,
+                                   font=("Consolas", 10, "bold"), padx=8, pady=3)
         self.time_label.pack(side="left", padx=8)
 
-        tk.Button(header, text="+", width=3, command=self.zoom_in).pack(side="right", padx=2)
-        tk.Button(header, text="-", width=3, command=self.zoom_out).pack(side="right", padx=2)
+        flat_button(header, "+", self.zoom_in, width=2).pack(side="right", padx=(2, 10), pady=5)
+        flat_button(header, "−", self.zoom_out, width=2).pack(side="right", padx=2, pady=5)
 
         body = tk.Frame(self, bg=PANEL)
         body.pack(fill="both", expand=True, padx=5, pady=(0, 5))
         body.grid_rowconfigure(0, weight=1)
         body.grid_columnconfigure(0, weight=1)
 
-        self.canvas = tk.Canvas(body, bg="#181818", highlightthickness=0)
-        self.h_scroll = tk.Scrollbar(body, orient="horizontal", command=self.canvas.xview)
-        self.v_scroll = tk.Scrollbar(body, orient="vertical", command=self.canvas.yview)
+        self.canvas = tk.Canvas(body, bg=PANEL_DEEP, highlightthickness=0)
+        from tkinter import ttk
+        self.h_scroll = ttk.Scrollbar(body, orient="horizontal", command=self.canvas.xview)
+        self.v_scroll = ttk.Scrollbar(body, orient="vertical", command=self.canvas.yview)
         self.canvas.configure(xscrollcommand=self.h_scroll.set, yscrollcommand=self.v_scroll.set)
 
         self.canvas.grid(row=0, column=0, sticky="nsew")
@@ -162,14 +166,14 @@ class TimelinePanel(tk.Frame):
 
     # Draw line.
         self.canvas.create_line(x,0,x,timeline_height,
-            fill="#ff4040",
+            fill=PLAYHEAD,
             width=2,
             tags="playhead"
         )
 
     # Draw triangle.
         self.canvas.create_polygon(x - 6,0,x + 6,0,x,9,
-            fill="#ff4040",
+            fill=PLAYHEAD,
             outline="",
             tags="playhead"
         )
@@ -325,7 +329,7 @@ class TimelinePanel(tk.Frame):
         for index, layer in enumerate(self.layers):
             y0 = self.RULER_HEIGHT + index * self.TRACK_HEIGHT
             y1 = y0 + self.TRACK_HEIGHT
-            fill = "#1d1d1d" if index % 2 == 0 else "#222222"
+            fill = TRACK_A if index % 2 == 0 else TRACK_B
 
             self.canvas.create_rectangle(
                 0, y0, width, y1,
@@ -349,10 +353,10 @@ class TimelinePanel(tk.Frame):
                 x1 = clip.end_time * self.pixels_per_second
 
                 if clip.media_type == "video":
-                    fill = "#315f86"
+                    fill = VIDEO_CLIP
                     prefix = "VID "
                 else:
-                    fill = "#4f6b3a"
+                    fill = IMAGE_CLIP
                     prefix = "IMG "
 
                 self.canvas.create_rectangle(
@@ -370,12 +374,12 @@ class TimelinePanel(tk.Frame):
 
     def _draw_playhead(self, height):
         x = self.current_time * self.pixels_per_second
-        self.canvas.create_line(x, 0, x, height, fill="#ff4040", width=2, tags="playhead")
+        self.canvas.create_line(x, 0, x, height, fill=PLAYHEAD, width=2, tags="playhead")
         self.canvas.create_polygon(
             x - 6, 0,
             x + 6, 0,
             x, 9,
-            fill="#ff4040",
+            fill=PLAYHEAD,
             outline="",
             tags="playhead"
         )
