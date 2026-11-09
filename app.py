@@ -249,6 +249,10 @@ class CameraViewerApp:
 
                 height, width = frame.shape[:2]
 
+                # -----------------------------
+                # Move mouse
+                # -----------------------------
+
                 self.hand_mouse.move(
                     x,
                     y,
@@ -256,7 +260,46 @@ class CameraViewerApp:
                     height
                 )
 
-            frame = self.hand_tracker.draw(frame)
+                # -----------------------------
+                # Detect pinch
+                # -----------------------------
+
+                pinch_clicked = (
+                    self.hand_tracker.detect_pinch(
+                        frame
+                    )
+                )
+
+                if pinch_clicked:
+
+                    self.hand_mouse.click()
+
+                    print("CLICK")
+
+            # frame = self.hand_tracker.draw(frame)
+
+            index_finger = self.hand_tracker.get_index_finger(frame)
+            thumb = self.hand_tracker.get_thumb(frame)
+
+            if index_finger is not None:
+
+                cv2.circle(
+                    frame,
+                    index_finger,
+                    6,
+                    (0, 255, 0),
+                    -1
+                )
+
+            if thumb is not None:
+
+                cv2.circle(
+                    frame,
+                    thumb,
+                    6,
+                    (0, 255, 255),
+                    -1
+                )
 
         except Exception as error:
 

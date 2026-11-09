@@ -1,3 +1,4 @@
+
 import os
 import time
 import math
@@ -20,14 +21,13 @@ class HandTracker:
         self,
         model_path=None,
         max_hands=1,
-        detection_confidence=0.6,
-        tracking_confidence=0.6
+        detection_confidence=0.5,
+        tracking_confidence=0.5,
+        tracking_width=480
     ):
 
         # ----------------------------------------------------
-        # Find model relative to THIS Python file.
-        # This prevents problems caused by running main.py
-        # from a different working directory.
+        # Find MediaPipe model
         # ----------------------------------------------------
 
         if model_path is None:
@@ -50,6 +50,14 @@ class HandTracker:
             )
 
         # ----------------------------------------------------
+        # Tracking resolution
+        #
+        # MediaPipe does NOT need the full webcam resolution.
+        # ----------------------------------------------------
+
+        self.tracking_width = tracking_width
+
+        # ----------------------------------------------------
         # MediaPipe configuration
         # ----------------------------------------------------
 
@@ -59,16 +67,10 @@ class HandTracker:
 
         options = vision.HandLandmarkerOptions(
             base_options=base_options,
-
             running_mode=vision.RunningMode.VIDEO,
-
             num_hands=max_hands,
-
-            min_hand_detection_confidence=
-                detection_confidence,
-
-            min_tracking_confidence=
-                tracking_confidence
+            min_hand_detection_confidence=detection_confidence,
+            min_tracking_confidence=tracking_confidence
         )
 
         self.landmarker = (
@@ -79,8 +81,20 @@ class HandTracker:
 
         self.results = None
 
-        # MediaPipe VIDEO mode requires increasing timestamps.
         self.start_time = time.monotonic()
+
+        # Pinch / click state
+        self.is_pinching = False
+
+        # Distance between thumb and index that counts as a pinch.
+        # We'll tune this if needed.
+        self.pinch_threshold = 35
+
+        # Prevent MediaPipe from running every camera frame.
+        self.last_process_time = 0
+
+        # 30 FPS hand detection is plenty for now.
+        self.tracking_interval = 1 / 30
 
     # ========================================================
     # PROCESS FRAME
@@ -88,16 +102,59 @@ class HandTracker:
 
     def process(self, frame):
 
-        # OpenCV:
-        # BGR
-        #
-        # MediaPipe:
-        # RGB
+        current_time = time.monotonic()
+
+        # ----------------------------------------------------
+        # Limit MediaPipe processing to ~20 FPS
+        # ----------------------------------------------------
+
+        if (
+            current_time - self.last_process_time
+            < self.tracking_interval
+        ):
+            return self.results
+
+        self.last_process_time = current_time
+
+        # ----------------------------------------------------
+        # Resize ONLY the image going to MediaPipe
+        # ----------------------------------------------------
+
+        height, width = frame.shape[:2]
+
+        scale = self.tracking_width / width
+
+        tracking_height = max(
+            1,
+            int(height * scale)
+        )
+
+        small_frame = cv2.resize(
+            frame,
+            (
+                self.tracking_width,
+                tracking_height
+            ),
+            interpolation=cv2.INTER_AREA
+        )
+
+        # ----------------------------------------------------
+        # BGR -> RGB
+        # ----------------------------------------------------
 
         rgb_frame = cv2.cvtColor(
-            frame,
+            small_frame,
             cv2.COLOR_BGR2RGB
         )
+
+        # Make array contiguous for MediaPipe.
+        rgb_frame = (
+            rgb_frame.copy(order="C")
+        )
+
+        # ----------------------------------------------------
+        # MediaPipe image
+        # ----------------------------------------------------
 
         mp_image = mp.Image(
             image_format=mp.ImageFormat.SRGB,
@@ -105,9 +162,16 @@ class HandTracker:
         )
 
         timestamp_ms = int(
-            (time.monotonic() - self.start_time)
+            (
+                current_time
+                - self.start_time
+            )
             * 1000
         )
+
+        # ----------------------------------------------------
+        # Detect hand
+        # ----------------------------------------------------
 
         self.results = (
             self.landmarker.detect_for_video(
@@ -119,17 +183,17 @@ class HandTracker:
         return self.results
 
     # ========================================================
-    # CHECK FOR HAND
+    # HAND DETECTED
     # ========================================================
 
     def hand_detected(self):
 
-        if self.results is None:
-            return False
-
-        return len(
-            self.results.hand_landmarks
-        ) > 0
+        return (
+            self.results is not None
+            and len(
+                self.results.hand_landmarks
+            ) > 0
+        )
 
     # ========================================================
     # GET LANDMARK
@@ -153,6 +217,12 @@ class HandTracker:
 
         landmark = hand[landmark_id]
 
+        # MediaPipe landmarks are normalized.
+        #
+        # That means they can be converted directly
+        # to the ORIGINAL camera dimensions even though
+        # detection ran on the smaller image.
+
         height, width = frame.shape[:2]
 
         x = int(
@@ -167,8 +237,6 @@ class HandTracker:
 
     # ========================================================
     # INDEX FINGER
-    #
-    # MediaPipe landmark 8
     # ========================================================
 
     def get_index_finger(self, frame):
@@ -180,8 +248,6 @@ class HandTracker:
 
     # ========================================================
     # THUMB
-    #
-    # MediaPipe landmark 4
     # ========================================================
 
     def get_thumb(self, frame):
@@ -203,9 +269,7 @@ class HandTracker:
         )
 
     # ========================================================
-    # DISTANCE BETWEEN LANDMARKS
-    #
-    # We'll use this later for gestures such as pinch.
+    # LANDMARK DISTANCE
     # ========================================================
 
     def get_distance(
@@ -239,6 +303,39 @@ class HandTracker:
             y2 - y1
         )
 
+    def detect_pinch(self, frame):
+
+        # Thumb tip = 4
+        # Index fingertip = 8
+        distance = self.get_distance(
+            frame,
+            4,
+            8
+        )
+
+        if distance is None:
+            self.is_pinching = False
+            return False
+
+        # Fingers are touching
+        if distance < self.pinch_threshold:
+
+            # Only return True on the FIRST frame
+            # where the fingers touch.
+            if not self.is_pinching:
+
+                self.is_pinching = True
+
+                return True
+
+        else:
+
+            # Fingers separated again.
+            # Allow another click.
+            self.is_pinching = False
+
+        return False
+
     # ========================================================
     # DRAW HAND
     # ========================================================
@@ -253,8 +350,6 @@ class HandTracker:
         )
 
         height, width = frame.shape[:2]
-
-        # Convert normalized landmarks to pixels.
 
         points = []
 
@@ -271,10 +366,6 @@ class HandTracker:
             points.append(
                 (x, y)
             )
-
-        # ----------------------------------------------------
-        # MediaPipe hand connections
-        # ----------------------------------------------------
 
         connections = [
 
@@ -321,21 +412,22 @@ class HandTracker:
                 points[start],
                 points[end],
                 (255, 255, 255),
-                2
+                1
             )
 
-        # Draw landmarks.
+        # Draw smaller landmarks.
 
         for index, point in enumerate(points):
 
-            # Make index fingertip green.
             if index == 8:
+
                 color = (0, 255, 0)
-                radius = 8
+                radius = 6
 
             else:
+
                 color = (0, 140, 255)
-                radius = 4
+                radius = 3
 
             cv2.circle(
                 frame,
@@ -364,21 +456,31 @@ class HandMouseController:
 
     def __init__(
         self,
-        smoothing=0.25,
+        smoothing=0.75,
         margin=0.10
     ):
+
+        # ----------------------------------------------------
+        # IMPORTANT PERFORMANCE FIX
+        #
+        # PyAutoGUI normally pauses after every call.
+        # We are moving the mouse many times per second.
+        # ----------------------------------------------------
+
+        pyautogui.PAUSE = 0
+        pyautogui.FAILSAFE = False
 
         self.screen_width, self.screen_height = (
             pyautogui.size()
         )
 
+        # Higher than the previous 0.25.
+        #
+        # 0.25 = smoother but noticeably delayed
+        # 0.50 = good starting point
+        # 0.70 = faster but more jittery
         self.smoothing = smoothing
 
-        # Camera border that is ignored.
-        #
-        # Example:
-        # 10% margin means you don't need to physically move
-        # your finger all the way to the edge of the camera.
         self.margin = margin
 
         self.current_x = (
@@ -391,7 +493,17 @@ class HandMouseController:
 
         self.enabled = True
 
-        pyautogui.FAILSAFE = False
+        # ----------------------------------------------------
+        # Mouse update limiting
+        # ----------------------------------------------------
+
+        self.last_move_time = 0
+
+        # Maximum ~60 cursor updates per second.
+        self.move_interval = 1 / 60
+
+        # Ignore extremely tiny movements.
+        self.deadzone = 2
 
     # ========================================================
     # ENABLE
@@ -415,15 +527,21 @@ class HandMouseController:
 
     def toggle(self):
 
-        self.enabled = (
-            not self.enabled
-        )
+        self.enabled = not self.enabled
 
         return self.enabled
 
     # ========================================================
     # MOVE CURSOR
     # ========================================================
+
+
+    def click(self):
+
+        if not self.enabled:
+            return
+
+        pyautogui.click()
 
     def move(
         self,
@@ -435,6 +553,16 @@ class HandMouseController:
 
         if not self.enabled:
             return
+
+        current_time = time.monotonic()
+
+        if (
+            current_time - self.last_move_time
+            < self.move_interval
+        ):
+            return
+
+        self.last_move_time = current_time
 
         # ----------------------------------------------------
         # Active camera area
@@ -460,8 +588,14 @@ class HandMouseController:
             - (2 * margin_y)
         )
 
+        if (
+            usable_width <= 0
+            or usable_height <= 0
+        ):
+            return
+
         # ----------------------------------------------------
-        # Convert finger position to 0-1
+        # Normalize finger position
         # ----------------------------------------------------
 
         normalized_x = (
@@ -474,54 +608,75 @@ class HandMouseController:
             / usable_height
         )
 
-        # Clamp values.
-
         normalized_x = max(
-            0,
+            0.0,
             min(
-                1,
+                1.0,
                 normalized_x
             )
         )
 
         normalized_y = max(
-            0,
+            0.0,
             min(
-                1,
+                1.0,
                 normalized_y
             )
         )
 
         # ----------------------------------------------------
-        # Convert to screen coordinates
+        # Convert to monitor position
         # ----------------------------------------------------
 
         target_x = (
             normalized_x
-            * self.screen_width
+            * (self.screen_width - 1)
         )
 
         target_y = (
             normalized_y
-            * self.screen_height
+            * (self.screen_height - 1)
         )
 
         # ----------------------------------------------------
-        # Smooth cursor
+        # Smooth
         # ----------------------------------------------------
 
-        self.current_x += (
-            target_x
-            - self.current_x
-        ) * self.smoothing
+        new_x = (
+            self.current_x
+            + (
+                target_x
+                - self.current_x
+            )
+            * self.smoothing
+        )
 
-        self.current_y += (
-            target_y
-            - self.current_y
-        ) * self.smoothing
+        new_y = (
+            self.current_y
+            + (
+                target_y
+                - self.current_y
+            )
+            * self.smoothing
+        )
 
         # ----------------------------------------------------
-        # Keep cursor inside monitor
+        # Ignore tiny movements
+        # ----------------------------------------------------
+
+        movement = math.hypot(
+            new_x - self.current_x,
+            new_y - self.current_y
+        )
+
+        if movement < self.deadzone:
+            return
+
+        self.current_x = new_x
+        self.current_y = new_y
+
+        # ----------------------------------------------------
+        # Clamp
         # ----------------------------------------------------
 
         self.current_x = max(
