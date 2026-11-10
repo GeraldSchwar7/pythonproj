@@ -1,0 +1,90 @@
+# ============================================================
+# EDITOR CONTROLLER
+# Central interface for editor actions.
+# ============================================================
+
+
+class EditorController:
+
+    def __init__(self, workspace):
+
+        self.workspace = workspace
+
+    # ========================================================
+    # GET SELECTED CLIP
+    # ========================================================
+
+    def get_selected_clip(self):
+
+        timeline = self.workspace.timeline
+
+        if hasattr(timeline, "selected_clip"):
+            return timeline.selected_clip
+
+        return None
+
+    # ========================================================
+    # GET SELECTED LAYER
+    # ========================================================
+
+    def get_selected_layer(self):
+
+        layers = self.workspace.layers
+
+        if hasattr(layers, "selected_layer"):
+            return layers.selected_layer
+
+        return None
+
+    # ========================================================
+    # DELETE
+    # ========================================================
+
+    def delete_selected(self):
+
+        # Timeline clip gets priority.
+        clip = self.get_selected_clip()
+
+        if clip is not None:
+
+            print(
+                "EditorController: deleting clip:",
+                clip
+            )
+
+            # We'll connect this to your exact timeline
+            # delete method below.
+            if hasattr(
+                self.workspace.timeline,
+                "delete_clip"
+            ):
+                self.workspace.timeline.delete_clip(
+                    clip
+                )
+
+            return
+
+        # Otherwise check layers.
+
+        layer = self.get_selected_layer()
+
+        if layer is not None:
+
+            print(
+                "EditorController: deleting layer:",
+                layer
+            )
+
+            if hasattr(
+                self.workspace.layers,
+                "delete_layer"
+            ):
+                self.workspace.layers.delete_layer(
+                    layer
+                )
+
+            return
+
+        print(
+            "EditorController: nothing selected"
+        )
