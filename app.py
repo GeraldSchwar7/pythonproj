@@ -7,6 +7,7 @@ from settings import (BG, PANEL, PANEL_LIGHT, BORDER, TEXT, TEXT_DIM, ACCENT, FO
 from camera_manager import CameraManager
 from hand_tracker import HandTracker, HandMouseController
 from workspace import Workspace
+from editor_controller import EditorController
 
 # ============================================================
 # MAIN APPLICATION
@@ -66,6 +67,10 @@ class CameraViewerApp:
 
         self.workspace = Workspace(
             self.root
+        )
+
+        self.editor = EditorController(
+            self.workspace
         )
 
         self.workspace.pack(
