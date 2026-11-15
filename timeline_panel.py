@@ -1,3 +1,4 @@
+import time
 import tkinter as tk
 from settings import (PANEL, PANEL_LIGHT, PANEL_HOVER, PANEL_DEEP, BORDER, TEXT, TEXT_DIM,
                       TEXT_MUTED, ACCENT, PLAYHEAD, TRACK_A, TRACK_B, VIDEO_CLIP,
@@ -20,6 +21,10 @@ class TimelinePanel(tk.Frame):
         self.current_time = 0.0
         self.timeline_duration = 60.0
         self.pixels_per_second = 70.0
+        self.is_playing = False
+        self.playback_job = None
+        self.playback_interval_ms = 33
+        self._last_playback_tick = None
 
         self.dragged_clip = None
         self.dragged_clip_layer = None
@@ -40,6 +45,13 @@ class TimelinePanel(tk.Frame):
         self.time_label = tk.Label(header, text="00:00.00", bg=PANEL_DEEP, fg=TEXT,
                                    font=("Consolas", 10, "bold"), padx=8, pady=3)
         self.time_label.pack(side="left", padx=8)
+
+        self.play_button = flat_button(
+            header,
+            "Play",
+            self.toggle_playback
+        )
+        self.play_button.pack(side="left", padx=4)
 
         flat_button(header, "+", self.zoom_in, width=2).pack(side="right", padx=(2, 10), pady=5)
         flat_button(header, "−", self.zoom_out, width=2).pack(side="right", padx=2, pady=5)
@@ -181,17 +193,9 @@ class TimelinePanel(tk.Frame):
         self.canvas.tag_raise("playhead")
 
     def _update_playhead_from_x(self,timeline_x):
-        new_time = (timeline_x/self.pixels_per_second)
-        new_time = max(0.0,min(new_time,self.timeline_duration))
-        self.current_time = new_time
-        self.time_label.configure(text=self._format_time(self.current_time,hundredths=True))
-
-    # Move only the playhead.
-        self._move_playhead_visual()
-
-    # Update viewport.
-        if (self.on_time_changed is not None):
-            self.on_time_changed(self.current_time)
+        self.set_current_time(
+            timeline_x / self.pixels_per_second
+        )
 
     def _mouse_dragged(self, event):
  
@@ -199,7 +203,6 @@ class TimelinePanel(tk.Frame):
             timeline_x = (self.canvas.canvasx(event.x))
             self._update_playhead_from_x(timeline_x)
 
-        if not self.is_dragging_clip or self.dragged_clip is None:
             return
 
         timeline_x = self.canvas.canvasx(event.x)
@@ -250,14 +253,68 @@ class TimelinePanel(tk.Frame):
         self.canvas.configure(cursor="fleur" if clip is not None else "")
 
     def set_current_time(self, value):
-        
         self.current_time = max(0.0, min(float(value), self.timeline_duration))
         self.time_label.configure(text=self._format_time(self.current_time, hundredths=True))
-
+        self._move_playhead_visual()
 
         if self.on_time_changed is not None:
             self.on_time_changed(self.current_time)
-        
+
+    def toggle_playback(self):
+        if self.is_playing:
+            self.pause_playback()
+        else:
+            self.play_playback()
+
+    def play_playback(self):
+        if self.is_playing:
+            return
+
+        if self.current_time >= self.timeline_duration:
+            self.set_current_time(0.0)
+
+        self.is_playing = True
+        self.play_button.configure(text="Pause")
+        self._last_playback_tick = time.monotonic()
+        self.playback_job = self.after(
+            self.playback_interval_ms,
+            self._advance_playback
+        )
+
+    def pause_playback(self):
+        self.is_playing = False
+        self._last_playback_tick = None
+
+        if self.playback_job is not None:
+            self.after_cancel(self.playback_job)
+            self.playback_job = None
+
+        self.play_button.configure(text="Play")
+
+    def _advance_playback(self):
+        self.playback_job = None
+
+        if not self.is_playing:
+            return
+
+        now = time.monotonic()
+        elapsed = now - self._last_playback_tick
+        self._last_playback_tick = now
+
+        next_time = min(
+            self.current_time + elapsed,
+            self.timeline_duration
+        )
+        self.set_current_time(next_time)
+
+        if self.current_time >= self.timeline_duration:
+            self.pause_playback()
+            return
+
+        self.playback_job = self.after(
+            self.playback_interval_ms,
+            self._advance_playback
+        )
 
     def zoom_in(self):
         self._set_zoom(min(400.0, self.pixels_per_second * 1.25))
