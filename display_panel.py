@@ -45,13 +45,16 @@ class DisplayPanel(tk.Frame):
         # VIEWPORT RENDER SCHEDULING
         # ==================================================
 
-        self.pending_viewport_time = 4.0
+        self.pending_viewport_time = 0.0
 
         self.viewport_render_job = None
 
         # About 30 FPS.
-        self.viewport_frame_delay = 20
+        self.viewport_frame_delay = 33
 
+        self._video_captures = {}
+        self._video_decoder_frames = {}
+        self._video_frame_cache = {}
 
         # ==================================================
         # CAMERA WINDOW
@@ -231,9 +234,6 @@ class DisplayPanel(tk.Frame):
         # Current project time.
         self.viewport_time = 0.0
 
-        # Cache open video files.
-        self._video_captures = {}
-
     # ======================================================
     # VIEWPORT LAYERS
     # ======================================================
@@ -264,26 +264,24 @@ class DisplayPanel(tk.Frame):
 
         if (self.viewport_render_job is not None):
             return
-        
+
         self.viewport_render_job = (
-        self.after(self.viewport_frame_delay, self._render_pending_viewport))
-
-        self.viewport_time = max(
-            0.0,
-            float(project_time)
+            self.after(
+                self.viewport_frame_delay,
+                self._render_pending_viewport
+            )
         )
-
-        self.render_viewport()
 
     def _render_pending_viewport(self):
 
-    # Allow another render to be scheduled.
+        # Allow another render to be scheduled.
         self.viewport_render_job = None
 
-    # Render the newest requested time.
-        self.viewport_time = (self.pending_viewport_time)
+        # Render the newest requested time.
+        self.viewport_time = self.pending_viewport_time
 
         self.render_viewport()
+
     # ======================================================
     # GET VIDEO FRAME
     # ======================================================
@@ -299,9 +297,13 @@ class DisplayPanel(tk.Frame):
             )
         )
 
+        opened_capture = (
+            capture is not None
+            and capture.isOpened()
+        )
+
         if (
-            capture is None
-            or not capture.isOpened()
+            not opened_capture
         ):
 
             capture = (
@@ -313,6 +315,15 @@ class DisplayPanel(tk.Frame):
             self._video_captures[
                 clip.file_path
             ] = capture
+
+            self._video_decoder_frames.pop(
+                clip.file_path,
+                None
+            )
+            self._video_frame_cache.pop(
+                clip.file_path,
+                None
+            )
 
         if not capture.isOpened():
 
@@ -334,21 +345,66 @@ class DisplayPanel(tk.Frame):
             )
         )
 
-        capture.set(
-            cv2.CAP_PROP_POS_MSEC,
-            local_time * 1000.0
-        )
+        fps = clip.fps if clip.fps > 0 else 30.0
+        frame_index = int(local_time * fps)
 
-        success, frame = (
-            capture.read()
+        if clip.frame_count > 0:
+            frame_index = min(
+                frame_index,
+                clip.frame_count - 1
+            )
+
+        cached_frame = self._video_frame_cache.get(
+            clip.file_path
         )
 
         if (
-            not success
-            or frame is None
+            cached_frame is not None
+            and cached_frame[0] == frame_index
         ):
+            return cached_frame[1]
 
-            return None
+        last_frame_index = self._video_decoder_frames.get(
+            clip.file_path
+        )
+
+        sequential = (
+            last_frame_index is not None
+            and 0 < frame_index - last_frame_index <= 2
+        )
+
+        if not sequential:
+            seek_succeeded = capture.set(
+                cv2.CAP_PROP_POS_FRAMES,
+                frame_index
+            )
+
+            if not seek_succeeded:
+                self._video_decoder_frames.pop(
+                    clip.file_path,
+                    None
+                )
+                return None
+
+            last_frame_index = frame_index - 1
+
+        while last_frame_index < frame_index:
+            success, frame = capture.read()
+
+            if not success or frame is None:
+                self._video_decoder_frames.pop(
+                    clip.file_path,
+                    None
+                )
+                self._video_frame_cache.pop(
+                    clip.file_path,
+                    None
+                )
+                return None
+
+            last_frame_index += 1
+
+        self._video_decoder_frames[clip.file_path] = frame_index
 
         # OpenCV BGR -> RGBA.
         frame = cv2.cvtColor(
@@ -356,9 +412,13 @@ class DisplayPanel(tk.Frame):
             cv2.COLOR_BGR2RGBA
         )
 
-        return Image.fromarray(
-            frame
+        image = Image.fromarray(frame)
+        self._video_frame_cache[clip.file_path] = (
+            frame_index,
+            image
         )
+
+        return image
 
     # ======================================================
     # RENDER VIEWPORT
