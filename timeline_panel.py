@@ -8,6 +8,7 @@ from layer import Layer
 
 
 class TimelinePanel(tk.Frame):
+    HISTORY_LIMIT = 100
     TRACK_HEIGHT = 64
     RULER_HEIGHT = 32
     TRACK_HEADER_HEIGHT = 26
@@ -25,10 +26,15 @@ class TimelinePanel(tk.Frame):
             Layer("Foreground"),
         ]
         self.selected_layer = self.layers[0]
+        self.selected_clip = None
+        self.selected_clip_layer = None
         self.on_clip_added = on_clip_added
         self.on_time_changed = on_time_changed
         self.on_timeline_changed = on_timeline_changed
         self.on_layer_selected = on_layer_selected
+
+        self._undo_stack = []
+        self._redo_stack = []
 
         self.current_time = 0.0
         self.timeline_duration = 60.0
@@ -64,6 +70,19 @@ class TimelinePanel(tk.Frame):
         self.time_label = tk.Label(header, text="00:00.00", bg=PANEL_DEEP, fg=TEXT,
                                    font=("Consolas", 10, "bold"), padx=8, pady=3)
         self.time_label.pack(side="left", padx=8)
+
+        self.undo_button = flat_button(
+            header,
+            "Undo",
+            self.undo
+        )
+        self.undo_button.pack(side="left", padx=(4, 2))
+        self.redo_button = flat_button(
+            header,
+            "Redo",
+            self.redo
+        )
+        self.redo_button.pack(side="left", padx=2)
 
         self.play_button = flat_button(
             header,
@@ -112,6 +131,9 @@ class TimelinePanel(tk.Frame):
         self.canvas.bind("<Double-Button-1>", self._rename_layer_from_canvas)
         self.canvas.bind("<Shift-MouseWheel>", self._horizontal_wheel)
 
+        self._history_state = self._capture_timeline_state()
+        self._update_history_buttons()
+
     def set_layers(self, layers):
         self.layers = layers
         if self.selected_layer not in self.layers:
@@ -144,6 +166,9 @@ class TimelinePanel(tk.Frame):
 
         index = self.layers.index(layer)
         self.layers.remove(layer)
+        if self.selected_clip_layer is layer:
+            self.selected_clip = None
+            self.selected_clip_layer = None
         if self.selected_layer is layer:
             self.selected_layer = (
                 self.layers[min(index, len(self.layers) - 1)]
@@ -226,8 +251,113 @@ class TimelinePanel(tk.Frame):
         self.rename_selected_layer()
 
     def _notify_timeline_changed(self):
+        state = self._capture_timeline_state()
+        if state != self._history_state:
+            self._undo_stack.append(self._history_state)
+            if len(self._undo_stack) > self.HISTORY_LIMIT:
+                del self._undo_stack[0]
+            self._redo_stack.clear()
+            self._history_state = state
+            self._update_history_buttons()
+
         if self.on_timeline_changed is not None:
             self.on_timeline_changed()
+
+    def _capture_timeline_state(self):
+        return (
+            self.timeline_duration,
+            tuple(
+                (
+                    layer,
+                    layer.name,
+                    layer.visible,
+                    layer.x,
+                    layer.y,
+                    layer.scale,
+                    layer.opacity,
+                    tuple(
+                        (clip, clip.start_time, clip.duration)
+                        for clip in layer.clips
+                    )
+                )
+                for layer in self.layers
+            )
+        )
+
+    def _restore_timeline_state(self, state):
+        self.timeline_duration, layer_states = state
+        self.layers = []
+        for (
+            layer,
+            name,
+            visible,
+            x,
+            y,
+            scale,
+            opacity,
+            clip_states
+        ) in layer_states:
+            layer.name = name
+            layer.visible = visible
+            layer.x = x
+            layer.y = y
+            layer.scale = scale
+            layer.opacity = opacity
+            layer.clips = []
+            for clip, start_time, duration in clip_states:
+                clip.start_time = start_time
+                clip.duration = duration
+                layer.clips.append(clip)
+            self.layers.append(layer)
+
+        if self.selected_layer not in self.layers:
+            self.selected_layer = self.layers[0] if self.layers else None
+        if self.selected_clip is not None:
+            self.selected_clip_layer = next(
+                (
+                    layer for layer in self.layers
+                    if self.selected_clip in layer.clips
+                ),
+                None
+            )
+            if self.selected_clip_layer is None:
+                self.selected_clip = None
+
+        self.redraw()
+        if self.on_timeline_changed is not None:
+            self.on_timeline_changed()
+
+    def _update_history_buttons(self):
+        self.undo_button.configure(
+            state=tk.NORMAL if self._undo_stack else tk.DISABLED
+        )
+        self.redo_button.configure(
+            state=tk.NORMAL if self._redo_stack else tk.DISABLED
+        )
+
+    def undo(self):
+        if not self._undo_stack:
+            return False
+
+        self._redo_stack.append(self._capture_timeline_state())
+        state = self._undo_stack.pop()
+        self._history_state = state
+        self._restore_timeline_state(state)
+        self._update_history_buttons()
+        return True
+
+    def redo(self):
+        if not self._redo_stack:
+            return False
+
+        self._undo_stack.append(self._capture_timeline_state())
+        if len(self._undo_stack) > self.HISTORY_LIMIT:
+            del self._undo_stack[0]
+        state = self._redo_stack.pop()
+        self._history_state = state
+        self._restore_timeline_state(state)
+        self._update_history_buttons()
+        return True
 
     def _layer_index_at_y(self, timeline_y):
         if timeline_y < self.RULER_HEIGHT:
@@ -294,14 +424,38 @@ class TimelinePanel(tk.Frame):
         layer = self.layers[layer_index]
         layer.add_clip(clip)
         self.select_layer(layer)
+        self.selected_clip = clip
+        self.selected_clip_layer = layer
 
         self.timeline_duration = max(self.timeline_duration, clip.end_time + 5.0)
         self.redraw()
 
+        self._notify_timeline_changed()
         if self.on_clip_added is not None:
             self.on_clip_added(layer, clip)
 
         return True
+
+    def delete_clip(self, clip):
+        layer = next(
+            (layer for layer in self.layers if clip in layer.clips),
+            None
+        )
+        if layer is None:
+            return
+
+        layer.remove_clip(clip)
+        if self.selected_clip is clip:
+            self.selected_clip = None
+            self.selected_clip_layer = None
+        self.redraw()
+        self._notify_timeline_changed()
+
+    def _select_clip(self, layer, clip):
+        self.select_layer(layer)
+        self.selected_clip = clip
+        self.selected_clip_layer = layer
+        self.redraw()
 
     def _find_clip_at_position(self, timeline_x, timeline_y):
         if timeline_y < self.RULER_HEIGHT:
@@ -368,7 +522,7 @@ class TimelinePanel(tk.Frame):
 
         layer, clip, edge = self._find_clip_resize_edge(timeline_x, timeline_y)
         if clip is not None:
-            self.select_layer(layer)
+            self._select_clip(layer, clip)
             self.resizing_clip = clip
             self.resize_edge = edge
             self.resize_fixed_time = (
@@ -378,13 +532,18 @@ class TimelinePanel(tk.Frame):
 
         layer, clip = self._find_clip_at_position(timeline_x, timeline_y)
         if clip is not None:
-            self.select_layer(layer)
+            self._select_clip(layer, clip)
             self.dragged_clip = clip
             self.dragged_clip_layer = layer
             self.is_dragging_clip = True
             mouse_time = timeline_x / self.pixels_per_second
             self.drag_offset_time = mouse_time - clip.start_time
             return
+
+        if self.selected_clip is not None:
+            self.selected_clip = None
+            self.selected_clip_layer = None
+            self.redraw()
 
         layer_index = self._layer_reorder_handle_at_position(
             timeline_x, timeline_y
@@ -521,6 +680,7 @@ class TimelinePanel(tk.Frame):
                 self.dragged_clip_layer.remove_clip(self.dragged_clip)
                 target_layer.add_clip(self.dragged_clip)
                 self.dragged_clip_layer = target_layer
+                self.selected_clip_layer = target_layer
                 self.select_layer(target_layer)
 
         if self.dragged_clip.end_time > self.timeline_duration:
@@ -533,16 +693,15 @@ class TimelinePanel(tk.Frame):
             self.resizing_clip = None
             self.resize_edge = None
             self.redraw()
-            if self.on_timeline_changed is not None:
-                self.on_timeline_changed()
+            self._notify_timeline_changed()
             return
 
         if self.is_dragging_layer:
             self.is_dragging_layer = False
             self.dragged_layer = None
             self.redraw()
-            if self.layer_order_changed and self.on_timeline_changed is not None:
-                self.on_timeline_changed()
+            if self.layer_order_changed:
+                self._notify_timeline_changed()
             self.layer_order_changed = False
             return
 
@@ -559,8 +718,7 @@ class TimelinePanel(tk.Frame):
         self.is_dragging_clip = False
         self.redraw()
 
-        if self.on_timeline_changed is not None:
-            self.on_timeline_changed()
+        self._notify_timeline_changed()
 
     def _mouse_moved(self, event):
         timeline_x = self.canvas.canvasx(event.x)
@@ -788,7 +946,9 @@ class TimelinePanel(tk.Frame):
 
                 self.canvas.create_rectangle(
                     x0, y0, x1, y1,
-                    outline=BORDER, fill=fill, width=2
+                    outline=ACCENT if clip is self.selected_clip else BORDER,
+                    fill=fill,
+                    width=3 if clip is self.selected_clip else 2
                 )
 
                 self.canvas.create_text(
