@@ -291,7 +291,11 @@ class DisplayPanel(tk.Frame):
 
     def _get_video_frame(
         self,
-        clip
+        clip,
+        viewport_width,
+        viewport_height,
+        layer_scale,
+        layer_opacity
     ):
 
         capture = (
@@ -357,14 +361,17 @@ class DisplayPanel(tk.Frame):
                 clip.frame_count - 1
             )
 
+        cache_key = (
+            frame_index,
+            viewport_width,
+            viewport_height,
+            layer_scale,
+            layer_opacity
+        )
         cached_frame = self._video_frame_cache.get(
             clip.file_path
         )
-
-        if (
-            cached_frame is not None
-            and cached_frame[0] == frame_index
-        ):
+        if cached_frame is not None and cached_frame[0] == cache_key:
             return cached_frame[1]
 
         last_frame_index = self._video_decoder_frames.get(
@@ -409,15 +416,42 @@ class DisplayPanel(tk.Frame):
 
         self._video_decoder_frames[clip.file_path] = frame_index
 
-        # OpenCV BGR -> RGBA.
+        frame_height, frame_width = frame.shape[:2]
+        fit_scale = min(
+            viewport_width / frame_width,
+            viewport_height / frame_height
+        ) * layer_scale
+        new_size = (
+            max(1, int(frame_width * fit_scale)),
+            max(1, int(frame_height * fit_scale))
+        )
+        if new_size != (frame_width, frame_height):
+            interpolation = (
+                cv2.INTER_AREA
+                if new_size[0] < frame_width
+                or new_size[1] < frame_height
+                else cv2.INTER_LINEAR
+            )
+            frame = cv2.resize(
+                frame,
+                new_size,
+                interpolation=interpolation
+            )
+
+        # Resize the decoded BGR frame before color conversion to avoid
+        # allocating and resampling a full-resolution RGBA image each frame.
         frame = cv2.cvtColor(
             frame,
-            cv2.COLOR_BGR2RGBA
+            cv2.COLOR_BGR2RGB
         )
-
         image = Image.fromarray(frame)
+        if layer_opacity < 1.0:
+            image.putalpha(
+                int(255 * layer_opacity)
+            )
+
         self._video_frame_cache[clip.file_path] = (
-            frame_index,
+            cache_key,
             image
         )
 
@@ -585,37 +619,16 @@ class DisplayPanel(tk.Frame):
 
                     image = (
                         self._get_video_frame(
-                            clip
+                            clip,
+                            width,
+                            height,
+                            layer.scale,
+                            layer.opacity
                         )
                     )
 
                     if image is None:
                         continue
-
-                    # --------------------------------------
-                    # FIT VIDEO FRAME TO VIEWPORT
-                    # --------------------------------------
-
-                    image_width, image_height = image.size
-                    scale = min(
-                        width / image_width,
-                        height / image_height
-                    ) * layer.scale
-                    new_size = (
-                        max(1, int(image_width * scale)),
-                        max(1, int(image_height * scale))
-                    )
-
-                    image = image.resize(
-                        new_size,
-                        Image.Resampling.LANCZOS
-                    )
-
-                    if layer.opacity < 1.0:
-                        alpha = image.getchannel("A").point(
-                            lambda value: int(value * layer.opacity)
-                        )
-                        image.putalpha(alpha)
 
                     photo = ImageTk.PhotoImage(image)
 

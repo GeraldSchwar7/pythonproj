@@ -92,6 +92,10 @@ class CameraViewerApp:
             "<Control-Shift-Z>",
             self._redo_from_keyboard
         )
+        self.root.bind_all(
+            "<KeyRelease-space>",
+            self._toggle_playback_from_keyboard
+        )
 
         self.workspace.pack(
             fill="both",
@@ -136,6 +140,17 @@ class CameraViewerApp:
             return None
 
         self.workspace.timeline.redo()
+        return "break"
+
+    def _toggle_playback_from_keyboard(self, event):
+        focused_widget = self.root.focus_get()
+        if self._is_text_entry_focused() or isinstance(
+            focused_widget,
+            (tk.Button, ttk.Button)
+        ):
+            return None
+
+        self.workspace.timeline.toggle_playback()
         return "break"
 
     def _is_text_entry_focused(self):
