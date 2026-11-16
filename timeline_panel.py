@@ -31,10 +31,17 @@ class TimelinePanel(tk.Frame):
         self.drag_offset_time = 0.0
         self.is_dragging_clip = False
         self.is_dragging_playhead = False
+        self.resizing_clip = None
+        self.resize_edge = None
+        self.resize_fixed_time = 0.0
+        self.is_dragging_layer = False
+        self.dragged_layer = None
+        self.layer_order_changed = False
 
         # How close the mouse needs to be to the playhead
         # to grab it.
         self.playhead_grab_width = 8
+        self.clip_resize_grab_width = 6
 
         header = tk.Frame(self, bg=PANEL)
         header.pack(fill="x")
@@ -136,15 +143,49 @@ class TimelinePanel(tk.Frame):
 
         return None, None
 
+    def _find_clip_resize_edge(self, timeline_x, timeline_y):
+        layer, clip = self._find_clip_at_position(timeline_x, timeline_y)
+        if clip is None or clip.media_type != "image":
+            return None, None
+
+        left_x = clip.start_time * self.pixels_per_second
+        right_x = clip.end_time * self.pixels_per_second
+        left_distance = abs(timeline_x - left_x)
+        right_distance = abs(timeline_x - right_x)
+
+        if min(left_distance, right_distance) > self.clip_resize_grab_width:
+            return None, None
+
+        edge = "left" if left_distance <= right_distance else "right"
+        return clip, edge
+
+    def _layer_reorder_handle_at_position(self, timeline_x, timeline_y):
+        if not (6 <= timeline_x <= 20) or timeline_y < self.RULER_HEIGHT:
+            return None
+
+        layer_index = int(
+            (timeline_y - self.RULER_HEIGHT) // self.TRACK_HEIGHT
+        )
+        if not (0 <= layer_index < len(self.layers)):
+            return None
+
+        row_y = self.RULER_HEIGHT + layer_index * self.TRACK_HEIGHT
+        if timeline_y > row_y + 15:
+            return None
+
+        return layer_index
+
     def _mouse_pressed(self, event):
         timeline_x = self.canvas.canvasx(event.x)
         timeline_y = self.canvas.canvasy(event.y)
 
-        playhead_x = (self.current_time* self.pixels_per_second)
-        distance_from_playhead = abs(timeline_x - playhead_x)
-        if ( distance_from_playhead<= self.playhead_grab_width or timeline_y <= self.RULER_HEIGHT):
-            self.is_dragging_playhead = True
-            self._update_playhead_from_x(timeline_x)
+        clip, edge = self._find_clip_resize_edge(timeline_x, timeline_y)
+        if clip is not None:
+            self.resizing_clip = clip
+            self.resize_edge = edge
+            self.resize_fixed_time = (
+                clip.end_time if edge == "left" else clip.start_time
+            )
             return
 
         layer, clip = self._find_clip_at_position(timeline_x, timeline_y)
@@ -154,6 +195,23 @@ class TimelinePanel(tk.Frame):
             self.is_dragging_clip = True
             mouse_time = timeline_x / self.pixels_per_second
             self.drag_offset_time = mouse_time - clip.start_time
+            return
+
+        layer_index = self._layer_reorder_handle_at_position(
+            timeline_x, timeline_y
+        )
+        if layer_index is not None:
+            self.dragged_layer = self.layers[layer_index]
+            self.is_dragging_layer = True
+            self.layer_order_changed = False
+            return
+
+        playhead_x = self.current_time * self.pixels_per_second
+        distance_from_playhead = abs(timeline_x - playhead_x)
+        if (distance_from_playhead <= self.playhead_grab_width or
+                timeline_y <= self.RULER_HEIGHT):
+            self.is_dragging_playhead = True
+            self._update_playhead_from_x(timeline_x)
             return
 
         self.set_current_time(timeline_x / self.pixels_per_second)
@@ -198,14 +256,54 @@ class TimelinePanel(tk.Frame):
         )
 
     def _mouse_dragged(self, event):
- 
-        if self.is_dragging_playhead:
-            timeline_x = (self.canvas.canvasx(event.x))
-            self._update_playhead_from_x(timeline_x)
+        timeline_x = self.canvas.canvasx(event.x)
 
+        if self.resizing_clip is not None:
+            resized_time = max(0.0, timeline_x / self.pixels_per_second)
+            if self.resize_edge == "left":
+                new_start = min(
+                    resized_time,
+                    self.resize_fixed_time - 0.05
+                )
+                self.resizing_clip.start_time = max(0.0, new_start)
+                self.resizing_clip.duration = (
+                    self.resize_fixed_time - self.resizing_clip.start_time
+                )
+            else:
+                self.resizing_clip.duration = max(
+                    0.05,
+                    resized_time - self.resizing_clip.start_time
+                )
+
+            if self.resizing_clip.end_time > self.timeline_duration:
+                self.timeline_duration = self.resizing_clip.end_time + 5.0
+            self.redraw()
             return
 
-        timeline_x = self.canvas.canvasx(event.x)
+        if self.is_dragging_layer:
+            if not self.layers:
+                return
+
+            timeline_y = self.canvas.canvasy(event.y)
+            target_index = int(
+                (timeline_y - self.RULER_HEIGHT) // self.TRACK_HEIGHT
+            )
+            target_index = max(0, min(target_index, len(self.layers) - 1))
+            source_index = self.layers.index(self.dragged_layer)
+            if source_index != target_index:
+                layer = self.layers.pop(source_index)
+                self.layers.insert(target_index, layer)
+                self.layer_order_changed = True
+                self.redraw()
+            return
+
+        if self.is_dragging_playhead:
+            self._update_playhead_from_x(timeline_x)
+            return
+
+        if not self.is_dragging_clip:
+            return
+
         timeline_y = self.canvas.canvasy(event.y)
 
         mouse_time = timeline_x / self.pixels_per_second
@@ -229,11 +327,27 @@ class TimelinePanel(tk.Frame):
         self.redraw()
 
     def _mouse_released(self, event):
+        if self.resizing_clip is not None:
+            self.resizing_clip = None
+            self.resize_edge = None
+            self.redraw()
+            if self.on_timeline_changed is not None:
+                self.on_timeline_changed()
+            return
+
+        if self.is_dragging_layer:
+            self.is_dragging_layer = False
+            self.dragged_layer = None
+            self.redraw()
+            if self.layer_order_changed and self.on_timeline_changed is not None:
+                self.on_timeline_changed()
+            self.layer_order_changed = False
+            return
 
         if self.is_dragging_playhead:
-            self.is_dragging_playhead = False 
+            self.is_dragging_playhead = False
             return
-       
+
         if not self.is_dragging_clip:
             return
 
@@ -249,6 +363,15 @@ class TimelinePanel(tk.Frame):
     def _mouse_moved(self, event):
         timeline_x = self.canvas.canvasx(event.x)
         timeline_y = self.canvas.canvasy(event.y)
+        _, edge = self._find_clip_resize_edge(timeline_x, timeline_y)
+        if edge is not None:
+            self.canvas.configure(cursor="sb_h_double_arrow")
+            return
+
+        if self._layer_reorder_handle_at_position(timeline_x, timeline_y) is not None:
+            self.canvas.configure(cursor="fleur")
+            return
+
         _, clip = self._find_clip_at_position(timeline_x, timeline_y)
         self.canvas.configure(cursor="fleur" if clip is not None else "")
 
@@ -393,8 +516,15 @@ class TimelinePanel(tk.Frame):
                 outline=BORDER, fill=fill
             )
 
+            for grip_y in (y0 + 5, y0 + 9, y0 + 13):
+                self.canvas.create_line(
+                    8, grip_y, 18, grip_y,
+                    fill=TEXT_MUTED,
+                    width=1
+                )
+
             self.canvas.create_text(
-                8, y0 + 5,
+                24, y0 + 5,
                 text=layer.name,
                 anchor="nw",
                 fill=TEXT_DIM
@@ -428,6 +558,18 @@ class TimelinePanel(tk.Frame):
                     anchor="w",
                     fill=TEXT
                 )
+
+                if clip.media_type == "image":
+                    self.canvas.create_line(
+                        x0, y0 + 5, x0, y1 - 5,
+                        fill=TEXT,
+                        width=3
+                    )
+                    self.canvas.create_line(
+                        x1, y0 + 5, x1, y1 - 5,
+                        fill=TEXT,
+                        width=3
+                    )
 
     def _draw_playhead(self, height):
         x = self.current_time * self.pixels_per_second
