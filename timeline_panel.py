@@ -1,22 +1,34 @@
 import time
 import tkinter as tk
 from settings import (PANEL, PANEL_LIGHT, PANEL_HOVER, PANEL_DEEP, BORDER, TEXT, TEXT_DIM,
-                      TEXT_MUTED, ACCENT, PLAYHEAD, TRACK_A, TRACK_B, VIDEO_CLIP,
+                      TEXT_MUTED, ACCENT, ACCENT_SOFT, PLAYHEAD, TRACK_A, TRACK_B, VIDEO_CLIP,
                       IMAGE_CLIP, FONT, flat_button)
 from media_clip import MediaClip
+from layer import Layer
 
 
 class TimelinePanel(tk.Frame):
-    TRACK_HEIGHT = 52
+    TRACK_HEIGHT = 64
     RULER_HEIGHT = 32
+    TRACK_HEADER_HEIGHT = 26
+    CLIP_TOP_PADDING = 28
+    LAYER_NAME_X = 42
+    LAYER_NAME_WIDTH = 150
 
-    def __init__(self, parent, on_clip_added=None, on_time_changed=None, on_timeline_changed=None):
+    def __init__(self, parent, on_clip_added=None, on_time_changed=None,
+                 on_timeline_changed=None, on_layer_selected=None):
         super().__init__(parent, bg=PANEL, highlightbackground=BORDER, highlightthickness=1)
 
-        self.layers = []
+        self.layers = [
+            Layer("Background"),
+            Layer("Midground"),
+            Layer("Foreground"),
+        ]
+        self.selected_layer = self.layers[0]
         self.on_clip_added = on_clip_added
         self.on_time_changed = on_time_changed
         self.on_timeline_changed = on_timeline_changed
+        self.on_layer_selected = on_layer_selected
 
         self.current_time = 0.0
         self.timeline_duration = 60.0
@@ -63,6 +75,20 @@ class TimelinePanel(tk.Frame):
         flat_button(header, "+", self.zoom_in, width=2).pack(side="right", padx=(2, 10), pady=5)
         flat_button(header, "−", self.zoom_out, width=2).pack(side="right", padx=2, pady=5)
 
+        layer_toolbar = tk.Frame(self, bg=PANEL)
+        layer_toolbar.pack(fill="x", padx=8, pady=(0, 4))
+
+        tk.Label(
+            layer_toolbar,
+            text="LAYERS",
+            bg=PANEL,
+            fg=TEXT_DIM,
+            font=(FONT, 8, "bold")
+        ).pack(side="left", padx=(2, 8))
+
+        flat_button(layer_toolbar, "Add Layer", self.create_layer).pack(side="left", padx=2)
+        flat_button(layer_toolbar, "Delete Layer", self.delete_selected_layer).pack(side="left", padx=2)
+
         body = tk.Frame(self, bg=PANEL)
         body.pack(fill="both", expand=True, padx=5, pady=(0, 5))
         body.grid_rowconfigure(0, weight=1)
@@ -83,11 +109,167 @@ class TimelinePanel(tk.Frame):
         self.canvas.bind("<B1-Motion>", self._mouse_dragged)
         self.canvas.bind("<ButtonRelease-1>", self._mouse_released)
         self.canvas.bind("<Motion>", self._mouse_moved)
+        self.canvas.bind("<Double-Button-1>", self._rename_layer_from_canvas)
         self.canvas.bind("<Shift-MouseWheel>", self._horizontal_wheel)
 
     def set_layers(self, layers):
         self.layers = layers
+        if self.selected_layer not in self.layers:
+            self.selected_layer = self.layers[0] if self.layers else None
         self.redraw()
+
+    def select_layer(self, layer):
+        if layer not in self.layers or layer is self.selected_layer:
+            return
+
+        self.selected_layer = layer
+        self.redraw()
+        if self.on_layer_selected is not None:
+            self.on_layer_selected(layer)
+
+    def create_layer(self):
+        layer = Layer(f"Layer {len(self.layers) + 1}")
+        self.layers.insert(0, layer)
+        self.select_layer(layer)
+        self._notify_timeline_changed()
+        return layer
+
+    def delete_selected_layer(self):
+        if self.selected_layer is not None:
+            self.delete_layer(self.selected_layer)
+
+    def delete_layer(self, layer):
+        if layer not in self.layers:
+            return
+
+        index = self.layers.index(layer)
+        self.layers.remove(layer)
+        if self.selected_layer is layer:
+            self.selected_layer = (
+                self.layers[min(index, len(self.layers) - 1)]
+                if self.layers
+                else None
+            )
+            if self.on_layer_selected is not None:
+                self.on_layer_selected(self.selected_layer)
+
+        self.redraw()
+        self._notify_timeline_changed()
+
+    def rename_selected_layer(self):
+        layer = self.selected_layer
+        if layer is None:
+            return
+
+        layer_index = self.layers.index(layer)
+        row_y = self.RULER_HEIGHT + layer_index * self.TRACK_HEIGHT
+        rename_entry = tk.Entry(
+            self.canvas,
+            bg=PANEL_LIGHT,
+            fg=TEXT,
+            insertbackground=TEXT,
+            relief="flat"
+        )
+        rename_entry.insert(0, layer.name)
+        window_id = self.canvas.create_window(
+            self.LAYER_NAME_X + 4,
+            row_y + 4,
+            window=rename_entry,
+            anchor="nw",
+            width=self.LAYER_NAME_WIDTH - 8,
+            height=self.TRACK_HEADER_HEIGHT - 6
+        )
+        rename_entry.focus_set()
+        rename_entry.select_range(0, tk.END)
+        rename_finished = False
+
+        def finish_rename(event=None):
+            nonlocal rename_finished
+            if rename_finished:
+                return
+
+            rename_finished = True
+            new_name = rename_entry.get().strip()
+            if new_name:
+                layer.name = new_name
+
+            rename_entry.destroy()
+            self.canvas.delete(window_id)
+            self.redraw()
+            if new_name:
+                self._notify_timeline_changed()
+
+        def cancel_rename(event=None):
+            nonlocal rename_finished
+            if rename_finished:
+                return
+
+            rename_finished = True
+            rename_entry.destroy()
+            self.canvas.delete(window_id)
+
+        rename_entry.bind("<Return>", finish_rename)
+        rename_entry.bind("<FocusOut>", finish_rename)
+        rename_entry.bind("<Escape>", cancel_rename)
+
+    def _rename_layer_from_canvas(self, event):
+        timeline_x = self.canvas.canvasx(event.x)
+        timeline_y = self.canvas.canvasy(event.y)
+        layer_index = self._layer_name_index_at(
+            timeline_x,
+            timeline_y
+        )
+        if layer_index is None:
+            return
+
+        self.select_layer(self.layers[layer_index])
+        self.rename_selected_layer()
+
+    def _notify_timeline_changed(self):
+        if self.on_timeline_changed is not None:
+            self.on_timeline_changed()
+
+    def _layer_index_at_y(self, timeline_y):
+        if timeline_y < self.RULER_HEIGHT:
+            return None
+
+        layer_index = int(
+            (timeline_y - self.RULER_HEIGHT) // self.TRACK_HEIGHT
+        )
+        return layer_index if 0 <= layer_index < len(self.layers) else None
+
+    def _layer_name_index_at(self, timeline_x, timeline_y):
+        layer_index = self._layer_index_at_y(timeline_y)
+        if layer_index is None:
+            return None
+
+        name_box_items = self.canvas.find_withtag(
+            f"layer-name-box-{layer_index}"
+        )
+        if not name_box_items:
+            return None
+
+        bounds = self.canvas.bbox(name_box_items[0])
+        if bounds is None:
+            return None
+
+        x0, y0, x1, y1 = bounds
+        if x0 <= timeline_x <= x1 and y0 <= timeline_y <= y1:
+            return layer_index
+        return None
+
+    def _toggle_layer_visibility_at(self, timeline_x, timeline_y):
+        layer_index = self._layer_index_at_y(timeline_y)
+        if layer_index is None:
+            return False
+
+        row_y = self.RULER_HEIGHT + layer_index * self.TRACK_HEIGHT
+        if not (24 <= timeline_x <= 38 and row_y + 2 <= timeline_y <= row_y + 15):
+            return False
+
+        layer = self.layers[layer_index]
+        self.toggle_layer_visibility(layer)
+        return True
 
     def drop_asset_at_screen(self, file_path, x_root, y_root):
         local_x = x_root - self.canvas.winfo_rootx()
@@ -111,6 +293,7 @@ class TimelinePanel(tk.Frame):
         clip = MediaClip(file_path, start_time=start_time)
         layer = self.layers[layer_index]
         layer.add_clip(clip)
+        self.select_layer(layer)
 
         self.timeline_duration = max(self.timeline_duration, clip.end_time + 5.0)
         self.redraw()
@@ -129,7 +312,11 @@ class TimelinePanel(tk.Frame):
             return None, None
 
         layer = self.layers[layer_index]
-        clip_y0 = self.RULER_HEIGHT + layer_index * self.TRACK_HEIGHT + 16
+        clip_y0 = (
+            self.RULER_HEIGHT
+            + layer_index * self.TRACK_HEIGHT
+            + self.CLIP_TOP_PADDING
+        )
         clip_y1 = self.RULER_HEIGHT + (layer_index + 1) * self.TRACK_HEIGHT - 5
 
         if not (clip_y0 <= timeline_y <= clip_y1):
@@ -146,7 +333,7 @@ class TimelinePanel(tk.Frame):
     def _find_clip_resize_edge(self, timeline_x, timeline_y):
         layer, clip = self._find_clip_at_position(timeline_x, timeline_y)
         if clip is None or clip.media_type != "image":
-            return None, None
+            return None, None, None
 
         left_x = clip.start_time * self.pixels_per_second
         right_x = clip.end_time * self.pixels_per_second
@@ -154,10 +341,10 @@ class TimelinePanel(tk.Frame):
         right_distance = abs(timeline_x - right_x)
 
         if min(left_distance, right_distance) > self.clip_resize_grab_width:
-            return None, None
+            return None, None, None
 
         edge = "left" if left_distance <= right_distance else "right"
-        return clip, edge
+        return layer, clip, edge
 
     def _layer_reorder_handle_at_position(self, timeline_x, timeline_y):
         if not (6 <= timeline_x <= 20) or timeline_y < self.RULER_HEIGHT:
@@ -179,8 +366,9 @@ class TimelinePanel(tk.Frame):
         timeline_x = self.canvas.canvasx(event.x)
         timeline_y = self.canvas.canvasy(event.y)
 
-        clip, edge = self._find_clip_resize_edge(timeline_x, timeline_y)
+        layer, clip, edge = self._find_clip_resize_edge(timeline_x, timeline_y)
         if clip is not None:
+            self.select_layer(layer)
             self.resizing_clip = clip
             self.resize_edge = edge
             self.resize_fixed_time = (
@@ -190,6 +378,7 @@ class TimelinePanel(tk.Frame):
 
         layer, clip = self._find_clip_at_position(timeline_x, timeline_y)
         if clip is not None:
+            self.select_layer(layer)
             self.dragged_clip = clip
             self.dragged_clip_layer = layer
             self.is_dragging_clip = True
@@ -201,10 +390,22 @@ class TimelinePanel(tk.Frame):
             timeline_x, timeline_y
         )
         if layer_index is not None:
+            self.select_layer(self.layers[layer_index])
             self.dragged_layer = self.layers[layer_index]
             self.is_dragging_layer = True
             self.layer_order_changed = False
             return
+
+        layer_index = self._layer_name_index_at(timeline_x, timeline_y)
+        if layer_index is not None:
+            self.select_layer(self.layers[layer_index])
+            return
+
+        layer_index = self._layer_index_at_y(timeline_y)
+        if layer_index is not None:
+            self.select_layer(self.layers[layer_index])
+            if self._toggle_layer_visibility_at(timeline_x, timeline_y):
+                return
 
         playhead_x = self.current_time * self.pixels_per_second
         distance_from_playhead = abs(timeline_x - playhead_x)
@@ -320,6 +521,7 @@ class TimelinePanel(tk.Frame):
                 self.dragged_clip_layer.remove_clip(self.dragged_clip)
                 target_layer.add_clip(self.dragged_clip)
                 self.dragged_clip_layer = target_layer
+                self.select_layer(target_layer)
 
         if self.dragged_clip.end_time > self.timeline_duration:
             self.timeline_duration = self.dragged_clip.end_time + 5.0
@@ -363,7 +565,7 @@ class TimelinePanel(tk.Frame):
     def _mouse_moved(self, event):
         timeline_x = self.canvas.canvasx(event.x)
         timeline_y = self.canvas.canvasy(event.y)
-        _, edge = self._find_clip_resize_edge(timeline_x, timeline_y)
+        _, _, edge = self._find_clip_resize_edge(timeline_x, timeline_y)
         if edge is not None:
             self.canvas.configure(cursor="sb_h_double_arrow")
             return
@@ -382,6 +584,15 @@ class TimelinePanel(tk.Frame):
 
         if self.on_time_changed is not None:
             self.on_time_changed(self.current_time)
+
+    def toggle_layer_visibility(self, layer):
+        if layer not in self.layers:
+            return
+
+        self.select_layer(layer)
+        layer.visible = not layer.visible
+        self.redraw()
+        self._notify_timeline_changed()
 
     def toggle_playback(self):
         if self.is_playing:
@@ -509,11 +720,17 @@ class TimelinePanel(tk.Frame):
         for index, layer in enumerate(self.layers):
             y0 = self.RULER_HEIGHT + index * self.TRACK_HEIGHT
             y1 = y0 + self.TRACK_HEIGHT
-            fill = TRACK_A if index % 2 == 0 else TRACK_B
+            selected = layer is self.selected_layer
+            fill = (
+                ACCENT_SOFT
+                if selected
+                else TRACK_A if index % 2 == 0 else TRACK_B
+            )
 
             self.canvas.create_rectangle(
                 0, y0, width, y1,
-                outline=BORDER, fill=fill
+                outline=ACCENT if selected else BORDER,
+                fill=fill
             )
 
             for grip_y in (y0 + 5, y0 + 9, y0 + 13):
@@ -523,16 +740,39 @@ class TimelinePanel(tk.Frame):
                     width=1
                 )
 
+            self.canvas.create_rectangle(
+                self.LAYER_NAME_X,
+                y0 + 3,
+                self.LAYER_NAME_X + self.LAYER_NAME_WIDTH,
+                y0 + self.TRACK_HEADER_HEIGHT,
+                outline=ACCENT if selected else BORDER,
+                fill=PANEL_DEEP,
+                tags=(f"layer-name-box-{index}",)
+            )
+
             self.canvas.create_text(
                 24, y0 + 5,
-                text=layer.name,
+                text="●" if layer.visible else "○",
                 anchor="nw",
                 fill=TEXT_DIM
             )
 
+            self.canvas.create_text(
+                self.LAYER_NAME_X + 6, y0 + 6,
+                text=layer.name,
+                anchor="nw",
+                fill=TEXT if selected else TEXT_DIM,
+                font=(FONT, 9, "bold" if selected else "normal"),
+                tags=(f"layer-name-{index}",)
+            )
+
     def _draw_clips(self):
         for layer_index, layer in enumerate(self.layers):
-            y0 = self.RULER_HEIGHT + layer_index * self.TRACK_HEIGHT + 16
+            y0 = (
+                self.RULER_HEIGHT
+                + layer_index * self.TRACK_HEIGHT
+                + self.CLIP_TOP_PADDING
+            )
             y1 = self.RULER_HEIGHT + (layer_index + 1) * self.TRACK_HEIGHT - 5
 
             for clip in layer.clips:

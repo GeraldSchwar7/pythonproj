@@ -18,8 +18,8 @@ from timeline_panel import (
     TimelinePanel
 )
 
-from layer_panel import (
-    LayerPanel
+from layer_effects_panel import (
+    LayerEffectsPanel
 )
 
 
@@ -102,7 +102,10 @@ class Workspace(tk.Frame):
                 self._on_time_changed,
 
             on_timeline_changed=
-                self._on_timeline_changed
+                self._on_timeline_changed,
+
+            on_layer_selected=
+                self._on_layer_selected
         )
 
         self.timeline.grid(
@@ -114,17 +117,14 @@ class Workspace(tk.Frame):
         )
 
         # ==================================================
-        # LAYERS
+        # LAYER EFFECTS
         # ==================================================
 
-        self.layers = LayerPanel(
-            self,
-
-            on_layers_changed=
-                self._on_layers_changed
+        self.layer_effects = LayerEffectsPanel(
+            self
         )
 
-        self.layers.grid(
+        self.layer_effects.grid(
             row=1,
             column=2,
             sticky="nsew",
@@ -171,40 +171,16 @@ class Workspace(tk.Frame):
         # INITIAL SYNCHRONIZATION
         # ==================================================
 
-        self._on_layers_changed(
-            self.layers.layers
+        self.display.set_viewport_layers(
+            self.timeline.layers
+        )
+        self.layer_effects.set_layer(
+            self.timeline.selected_layer
         )
 
         self.display.set_viewport_time(
             self.timeline.current_time
         )
-
-    # ======================================================
-    # LAYERS CHANGED
-    # ======================================================
-
-    def _on_layers_changed(
-        self,
-        layers
-    ):
-
-        if hasattr(
-            self,
-            "timeline"
-        ):
-
-            self.timeline.set_layers(
-                layers
-            )
-
-        if hasattr(
-            self,
-            "display"
-        ):
-
-            self.display.set_viewport_layers(
-                layers
-            )
 
     # ======================================================
     # ASSET DROPPED
@@ -237,7 +213,7 @@ class Workspace(tk.Frame):
         # the viewport.
 
         self.display.set_viewport_layers(
-            self.layers.layers
+            self.timeline.layers
         )
 
         # Render the current playhead time.
@@ -265,28 +241,25 @@ class Workspace(tk.Frame):
             current_time
         )
 
-# ======================================================
-# TIMELINE ARRANGEMENT CHANGED
-# ======================================================
+    def _on_layer_selected(self, layer):
+        self.layer_effects.set_layer(layer)
+
+    # ======================================================
+    # TIMELINE ARRANGEMENT CHANGED
+    # ======================================================
 
     def _on_timeline_changed(
-    self
-):
-
-    # Refresh the viewport using the current
-    # timeline arrangement.
-
-        if hasattr(
-            self,
-            "layers"
-        ):
-
-            self.layers.refresh()
+        self
+    ):
 
         self.display.set_viewport_layers(
-            self.layers.layers
-    )
+            self.timeline.layers
+        )
 
         self.display.set_viewport_time(
             self.timeline.current_time
-    )
+        )
+
+        self.layer_effects.set_layer(
+            self.timeline.selected_layer
+        )

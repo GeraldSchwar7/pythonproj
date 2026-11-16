@@ -29,12 +29,7 @@ class EditorController:
 
     def get_selected_layer(self):
 
-        layers = self.workspace.layers
-
-        if hasattr(layers, "selected_layer"):
-            return layers.selected_layer
-
-        return None
+        return self.workspace.timeline.selected_layer
 
     # ========================================================
     # DELETE
@@ -75,13 +70,7 @@ class EditorController:
                 layer
             )
 
-            if hasattr(
-                self.workspace.layers,
-                "delete_layer"
-            ):
-                self.workspace.layers.delete_layer(
-                    layer
-                )
+            self.workspace.timeline.delete_layer(layer)
 
             return
 
