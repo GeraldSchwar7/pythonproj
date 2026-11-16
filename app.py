@@ -72,6 +72,26 @@ class CameraViewerApp:
         self.editor = EditorController(
             self.workspace
         )
+        self.root.bind_all(
+            "<Delete>",
+            self._delete_selected_from_keyboard
+        )
+        self.root.bind_all(
+            "<BackSpace>",
+            self._delete_selected_from_keyboard
+        )
+        self.root.bind_all(
+            "<Control-z>",
+            self._undo_from_keyboard
+        )
+        self.root.bind_all(
+            "<Control-y>",
+            self._redo_from_keyboard
+        )
+        self.root.bind_all(
+            "<Control-Shift-Z>",
+            self._redo_from_keyboard
+        )
 
         self.workspace.pack(
             fill="both",
@@ -96,6 +116,34 @@ class CameraViewerApp:
         )
 
         self.update_frame()
+
+    def _delete_selected_from_keyboard(self, event):
+        if self._is_text_entry_focused():
+            return None
+
+        self.editor.delete_selected()
+        return "break"
+
+    def _undo_from_keyboard(self, event):
+        if self._is_text_entry_focused():
+            return None
+
+        self.workspace.timeline.undo()
+        return "break"
+
+    def _redo_from_keyboard(self, event):
+        if self._is_text_entry_focused():
+            return None
+
+        self.workspace.timeline.redo()
+        return "break"
+
+    def _is_text_entry_focused(self):
+        focused_widget = self.root.focus_get()
+        return isinstance(
+            focused_widget,
+            (tk.Entry, tk.Text, ttk.Entry, ttk.Combobox)
+        )
 
     # ========================================================
     # MENU
