@@ -1,4 +1,5 @@
 import tkinter as tk
+from collections import OrderedDict
 
 from tkinter import ttk
 
@@ -55,6 +56,8 @@ class DisplayPanel(tk.Frame):
         self._video_captures = {}
         self._video_decoder_frames = {}
         self._video_frame_cache = {}
+        self._still_image_cache = OrderedDict()
+        self._still_photo_cache = OrderedDict()
 
         # ==================================================
         # CAMERA WINDOW
@@ -420,6 +423,54 @@ class DisplayPanel(tk.Frame):
 
         return image
 
+    def _get_still_photo(
+        self,
+        clip,
+        layer,
+        viewport_width,
+        viewport_height
+    ):
+        image = self._still_image_cache.get(clip.file_path)
+        if image is None:
+            with Image.open(clip.file_path) as source:
+                image = source.convert("RGBA")
+
+            self._still_image_cache[clip.file_path] = image
+            while len(self._still_image_cache) > 8:
+                self._still_image_cache.popitem(last=False)
+        else:
+            self._still_image_cache.move_to_end(clip.file_path)
+
+        image_width, image_height = image.size
+        scale = min(
+            viewport_width / image_width,
+            viewport_height / image_height
+        ) * layer.scale
+        new_size = (
+            max(1, int(image_width * scale)),
+            max(1, int(image_height * scale))
+        )
+        cache_key = (clip.file_path, new_size, layer.opacity)
+
+        photo = self._still_photo_cache.get(cache_key)
+        if photo is not None:
+            self._still_photo_cache.move_to_end(cache_key)
+            return photo
+
+        image = image.resize(new_size, Image.Resampling.LANCZOS)
+        if layer.opacity < 1.0:
+            alpha = image.getchannel("A").point(
+                lambda value: int(value * layer.opacity)
+            )
+            image.putalpha(alpha)
+
+        photo = ImageTk.PhotoImage(image)
+        self._still_photo_cache[cache_key] = photo
+        while len(self._still_photo_cache) > 16:
+            self._still_photo_cache.popitem(last=False)
+
+        return photo
+
     # ======================================================
     # RENDER VIEWPORT
     # ======================================================
@@ -530,10 +581,7 @@ class DisplayPanel(tk.Frame):
                 # VIDEO
                 # ------------------------------------------
 
-                if (
-                    clip.media_type
-                    == "video"
-                ):
+                if clip.media_type == "video":
 
                     image = (
                         self._get_video_frame(
@@ -544,101 +592,40 @@ class DisplayPanel(tk.Frame):
                     if image is None:
                         continue
 
-                # ------------------------------------------
-                # IMAGE
-                # ------------------------------------------
+                    # --------------------------------------
+                    # FIT VIDEO FRAME TO VIEWPORT
+                    # --------------------------------------
+
+                    image_width, image_height = image.size
+                    scale = min(
+                        width / image_width,
+                        height / image_height
+                    ) * layer.scale
+                    new_size = (
+                        max(1, int(image_width * scale)),
+                        max(1, int(image_height * scale))
+                    )
+
+                    image = image.resize(
+                        new_size,
+                        Image.Resampling.LANCZOS
+                    )
+
+                    if layer.opacity < 1.0:
+                        alpha = image.getchannel("A").point(
+                            lambda value: int(value * layer.opacity)
+                        )
+                        image.putalpha(alpha)
+
+                    photo = ImageTk.PhotoImage(image)
 
                 else:
-
-                    image = (
-                        Image.open(
-                            clip.file_path
-                        )
-                        .convert(
-                            "RGBA"
-                        )
+                    photo = self._get_still_photo(
+                        clip,
+                        layer,
+                        width,
+                        height
                     )
-
-                # ------------------------------------------
-                # FIT IMAGE TO VIEWPORT
-                # ------------------------------------------
-
-                image_width, image_height = (
-                    image.size
-                )
-
-                scale = min(
-                    width
-                    / image_width,
-
-                    height
-                    / image_height
-                )
-
-                # Apply layer scaling.
-                scale *= (
-                    layer.scale
-                )
-
-                new_size = (
-                    max(
-                        1,
-                        int(
-                            image_width
-                            * scale
-                        )
-                    ),
-
-                    max(
-                        1,
-                        int(
-                            image_height
-                            * scale
-                        )
-                    )
-                )
-
-                image = image.resize(
-                    new_size,
-                    Image.Resampling.LANCZOS
-                )
-
-                # ------------------------------------------
-                # OPACITY
-                # ------------------------------------------
-
-                if (
-                    layer.opacity
-                    < 1.0
-                ):
-
-                    alpha = (
-                        image
-                        .getchannel(
-                            "A"
-                        )
-                        .point(
-                            lambda value:
-                                int(
-                                    value
-                                    * layer.opacity
-                                )
-                        )
-                    )
-
-                    image.putalpha(
-                        alpha
-                    )
-
-                # ------------------------------------------
-                # TKINTER IMAGE
-                # ------------------------------------------
-
-                photo = (
-                    ImageTk.PhotoImage(
-                        image
-                    )
-                )
 
                 self.viewport_photos.append(
                     photo

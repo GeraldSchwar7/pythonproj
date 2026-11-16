@@ -276,6 +276,13 @@ class Workspace(tk.Frame):
     # Refresh the viewport using the current
     # timeline arrangement.
 
+        if hasattr(
+            self,
+            "layers"
+        ):
+
+            self.layers.refresh()
+
         self.display.set_viewport_layers(
             self.layers.layers
     )
