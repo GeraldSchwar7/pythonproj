@@ -1,16 +1,18 @@
 import tkinter as tk
 
-from settings import BORDER, PANEL, TEXT_DIM, TEXT, FONT
+from settings import BORDER, PANEL, TEXT_DIM, TEXT, FONT, flat_button
 
 
 class LayerEffectsPanel(tk.Frame):
-    def __init__(self, parent):
+    def __init__(self, parent, on_scene_separation=None):
         super().__init__(
             parent,
             bg=PANEL,
             highlightbackground=BORDER,
             highlightthickness=1
         )
+
+        self.on_scene_separation = on_scene_separation
 
         tk.Label(
             self,
@@ -36,6 +38,16 @@ class LayerEffectsPanel(tk.Frame):
             fill="x",
             padx=10,
             pady=(4, 8)
+        )
+
+        flat_button(
+            self,
+            "Scene Separation",
+            self._open_scene_separation
+        ).pack(
+            fill="x",
+            padx=10,
+            pady=(0, 8)
         )
 
         self.effects_container = tk.Frame(
@@ -64,15 +76,16 @@ class LayerEffectsPanel(tk.Frame):
 
         self.selected_layer = None
 
+    def _open_scene_separation(self):
+        if self.on_scene_separation is not None:
+            self.on_scene_separation()
+
     def set_layer(self, layer):
         self.selected_layer = layer
         self.selected_layer_label.configure(
             text=layer.name if layer is not None else "No layer selected"
         )
         self.placeholder_label.configure(
-            text=(
-                "No effects added yet. Layer effects can be managed here."
-                if layer is not None
-                else "Select a layer to configure its effects."
-            )
+            text="" if layer is not None
+            else "Select a layer to configure its effects."
         )

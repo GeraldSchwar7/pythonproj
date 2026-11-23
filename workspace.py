@@ -22,6 +22,10 @@ from layer_effects_panel import (
     LayerEffectsPanel
 )
 
+from scene_separation import SceneSeparationWindow
+from media_clip import MediaClip
+from layer import Layer
+
 
 class Workspace(tk.Frame):
 
@@ -34,6 +38,8 @@ class Workspace(tk.Frame):
             parent,
             bg=BG
         )
+
+        self.scene_separation_windows = []
 
         # ==================================================
         # GRID
@@ -121,7 +127,8 @@ class Workspace(tk.Frame):
         # ==================================================
 
         self.layer_effects = LayerEffectsPanel(
-            self
+            self,
+            on_scene_separation=self._open_scene_separation
         )
 
         self.layer_effects.grid(
@@ -243,6 +250,57 @@ class Workspace(tk.Frame):
 
     def _on_layer_selected(self, layer):
         self.layer_effects.set_layer(layer)
+
+    def _open_scene_separation(self):
+        selected_clip = self.timeline.selected_clip
+        if selected_clip is None:
+            return
+
+        selected_layer = self.timeline.selected_clip_layer
+        original_layer_name = (
+            selected_layer.name
+            if selected_layer is not None
+            else "Layer"
+        )
+
+        window = SceneSeparationWindow(
+            self,
+            selected_clip,
+            self.timeline.current_time,
+            original_layer_name,
+            on_add_layers=lambda layers: self._add_scene_separation_layers(
+                selected_clip,
+                layers,
+            ),
+        )
+        self.scene_separation_windows.append(window)
+
+        def close_scene_separation():
+            if window in self.scene_separation_windows:
+                self.scene_separation_windows.remove(window)
+            window.destroy()
+
+        window.protocol("WM_DELETE_WINDOW", close_scene_separation)
+
+    def _add_scene_separation_layers(self, source_clip, exported_layers):
+        for layer_name, image_path in exported_layers:
+            layer = Layer(layer_name)
+            segment_clip = MediaClip(
+                image_path,
+                start_time=source_clip.start_time,
+                duration=source_clip.duration,
+            )
+            layer.add_clip(segment_clip)
+            self.timeline.layers.insert(0, layer)
+
+        if exported_layers:
+            self.timeline.timeline_duration = max(
+                self.timeline.timeline_duration,
+                source_clip.end_time,
+            )
+            self.timeline.redraw()
+            self.timeline._notify_timeline_changed()
+            self._on_timeline_changed()
 
     # ======================================================
     # TIMELINE ARRANGEMENT CHANGED
