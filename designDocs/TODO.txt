@@ -1,0 +1,17 @@
+- Stabilize Mouse Acceleration
+- Dragging
+- Tools
+- Particle System
+- Hue and Saturation
+- Masking
+- Exporting
+- 
+
+Report:
+
+- Contribution Statement
+
+Presentation:
+
+- Make short demonstrations of the tools and effects and then during the live presentation do a quick demonstration of scene separation.
+
