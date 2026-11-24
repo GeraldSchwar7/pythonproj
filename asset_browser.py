@@ -242,29 +242,20 @@ class AssetBrowser(tk.Frame):
             button.pack()
 
             # ==================================================
-            # MEDIA TYPE LABEL
+            # FILE NAME LABEL
             # ==================================================
-
-            if (
-                extension
-                in VIDEO_EXTENSIONS
-            ):
-
-                media_type = "VIDEO"
-
-            else:
-
-                media_type = "IMAGE"
 
             tk.Label(
                 cell,
-                text=media_type,
+                text=os.path.basename(file_path),
                 bg=PANEL,
                 fg=TEXT,
                 font=(
                     "Segoe UI",
                     7
-                )
+                ),
+                width=14,
+                wraplength=84,
             ).pack()
 
             # ==================================================

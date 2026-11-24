@@ -4,7 +4,12 @@ from settings import BORDER, PANEL, TEXT_DIM, TEXT, FONT, flat_button
 
 
 class LayerEffectsPanel(tk.Frame):
-    def __init__(self, parent, on_scene_separation=None):
+    def __init__(
+        self,
+        parent,
+        on_scene_separation=None,
+        on_hue_saturation=None,
+    ):
         super().__init__(
             parent,
             bg=PANEL,
@@ -13,6 +18,7 @@ class LayerEffectsPanel(tk.Frame):
         )
 
         self.on_scene_separation = on_scene_separation
+        self.on_hue_saturation = on_hue_saturation
 
         tk.Label(
             self,
@@ -50,6 +56,16 @@ class LayerEffectsPanel(tk.Frame):
             pady=(0, 8)
         )
 
+        flat_button(
+            self,
+            "Hue/Saturation",
+            self._open_hue_saturation
+        ).pack(
+            fill="x",
+            padx=10,
+            pady=(0, 8)
+        )
+
         self.effects_container = tk.Frame(
             self,
             bg=PANEL
@@ -79,6 +95,10 @@ class LayerEffectsPanel(tk.Frame):
     def _open_scene_separation(self):
         if self.on_scene_separation is not None:
             self.on_scene_separation()
+
+    def _open_hue_saturation(self):
+        if self.on_hue_saturation is not None:
+            self.on_hue_saturation()
 
     def set_layer(self, layer):
         self.selected_layer = layer

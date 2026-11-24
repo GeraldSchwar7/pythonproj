@@ -2,10 +2,10 @@
 - Dragging
 - Tools
 - Particle System
-- Hue and Saturation
+- Hue and Saturation (halfway implemented)
 - Masking
 - Exporting
-- Fix Crashing
+- Fix Crashing (maybe fixed)
 
 Report:
 
