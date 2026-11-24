@@ -278,7 +278,7 @@ class Workspace(tk.Frame):
         def close_scene_separation():
             if window in self.scene_separation_windows:
                 self.scene_separation_windows.remove(window)
-            window.destroy()
+            window._close()
 
         window.protocol("WM_DELETE_WINDOW", close_scene_separation)
 

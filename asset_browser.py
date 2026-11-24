@@ -351,11 +351,8 @@ class AssetBrowser(tk.Frame):
 
         else:
 
-            image = Image.open(
-                file_path
-            ).convert(
-                "RGB"
-            )
+            with Image.open(file_path) as source:
+                image = source.convert("RGB")
 
         image.thumbnail(
             (90, 70)

@@ -1,6 +1,8 @@
 import os
 import uuid
 import threading
+import shutil
+import queue
 import tkinter as tk
 
 import cv2
@@ -22,6 +24,33 @@ from settings import (
     FONT,
     flat_button,
 )
+
+
+def get_scene_separation_cache_root():
+    return os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "scene_separation_cache",
+    )
+
+
+def clear_scene_separation_cache():
+    cache_root = get_scene_separation_cache_root()
+    if os.path.isdir(cache_root):
+        try:
+            shutil.rmtree(cache_root)
+        except OSError as error:
+            print(
+                "SceneSeparation: could not clear cache:",
+                error,
+            )
+            return
+    try:
+        os.makedirs(cache_root, exist_ok=True)
+    except OSError as error:
+        print(
+            "SceneSeparation: could not recreate cache:",
+            error,
+        )
 
 
 class SceneSeparationWindow(tk.Toplevel):
@@ -52,6 +81,9 @@ class SceneSeparationWindow(tk.Toplevel):
         self.layer_masks = []
         self.preview_photos = []
         self.processing = False
+        self._closing = False
+        self._processing_results = queue.Queue()
+        self._poll_processing_job = None
 
         self.resolution = tk.StringVar(value="720")
         self.layer_count = tk.StringVar(value="3")
@@ -160,7 +192,11 @@ class SceneSeparationWindow(tk.Toplevel):
         ).pack(fill="x", pady=(8, 0))
 
         self.preview_canvas.bind("<Configure>", self._redraw_preview)
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.protocol("WM_DELETE_WINDOW", self._close)
+        self._poll_processing_job = self.after(
+            50,
+            self._poll_processing_result,
+        )
         self._load_source_frame()
         self._load_bundled_models()
 
@@ -195,7 +231,7 @@ class SceneSeparationWindow(tk.Toplevel):
                     self.depth_net.setPreferableTarget(
                         cv2.dnn.DNN_TARGET_CPU
                     )
-            except cv2.error as error:
+            except Exception as error:
                 print("SceneSeparation: bundled depth model error:", error)
 
         if os.path.isfile(segmentation_path):
@@ -205,7 +241,7 @@ class SceneSeparationWindow(tk.Toplevel):
                     cv2.dnn.DNN_BACKEND_OPENCV
                 )
                 self.segmentation_net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
-            except cv2.error as error:
+            except Exception as error:
                 print("SceneSeparation: bundled segmentation model error:", error)
 
         if (
@@ -223,22 +259,27 @@ class SceneSeparationWindow(tk.Toplevel):
     def _load_source_frame(self):
         if self.clip.media_type == "video":
             capture = cv2.VideoCapture(self.clip.file_path)
-            if capture.isOpened():
-                local_time = max(
-                    0.0,
-                    min(
-                        self.current_time - self.clip.start_time,
-                        self.clip.duration,
-                    ),
-                )
-                capture.set(
-                    cv2.CAP_PROP_POS_MSEC,
-                    local_time * 1000.0,
-                )
-                ok, frame = capture.read()
+            try:
+                if capture.isOpened():
+                    local_time = max(
+                        0.0,
+                        min(
+                            self.current_time - self.clip.start_time,
+                            self.clip.duration,
+                        ),
+                    )
+                    capture.set(
+                        cv2.CAP_PROP_POS_MSEC,
+                        local_time * 1000.0,
+                    )
+                    ok, frame = capture.read()
+                    if ok:
+                        self.source_frame = cv2.cvtColor(
+                            frame,
+                            cv2.COLOR_BGR2RGB,
+                        )
+            finally:
                 capture.release()
-                if ok:
-                    self.source_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         else:
             image = cv2.imread(self.clip.file_path, cv2.IMREAD_COLOR)
             if image is not None:
@@ -256,43 +297,66 @@ class SceneSeparationWindow(tk.Toplevel):
 
         self.processing = True
         self.processing_status.set("Processing locally...")
+        source_frame = self.source_frame.copy()
+        try:
+            requested_layer_count = max(
+                2,
+                min(12, int(self.layer_count.get())),
+            )
+        except (TypeError, ValueError):
+            requested_layer_count = 3
+        selected_resolution = self.resolution.get()
+        target_width = (
+            0
+            if selected_resolution == "Original"
+            else int(selected_resolution)
+        )
+        depth_net = self.depth_net
+        depth_session = self.depth_session
+        segmentation_net = self.segmentation_net
         thread = threading.Thread(
             target=self._process_frame,
             daemon=True,
+            args=(
+                source_frame,
+                requested_layer_count,
+                target_width,
+                depth_net,
+                depth_session,
+                segmentation_net,
+            ),
         )
         thread.start()
 
-    def _process_frame(self):
+    def _process_frame(
+        self,
+        source_frame,
+        requested_layer_count,
+        target_width,
+        depth_net,
+        depth_session,
+        segmentation_net,
+    ):
         try:
-            try:
-                requested_layer_count = max(
-                    2,
-                    min(12, int(self.layer_count.get())),
-                )
-            except (TypeError, ValueError):
-                requested_layer_count = 3
-
-            selected_resolution = self.resolution.get()
-            target_width = (
-                0
-                if selected_resolution == "Original"
-                else int(selected_resolution)
-            )
             frame = self._resize_for_processing(
-                self.source_frame,
+                source_frame,
                 target_width,
             )
 
             if (
-                self.depth_net is not None
-                or self.depth_session is not None
+                depth_net is not None
+                or depth_session is not None
             ):
-                depth = self._estimate_depth(frame)
+                depth = self._estimate_depth(
+                    frame,
+                    depth_net,
+                    depth_session,
+                )
             else:
                 depth = self._fallback_depth(frame)
 
-            if self.segmentation_net is not None:
-                masks = self._segment_instances(frame)
+            if segmentation_net is not None:
+                masks = self._segment_instances(frame, segmentation_net)
             else:
                 masks = []
 
@@ -310,16 +374,58 @@ class SceneSeparationWindow(tk.Toplevel):
                     requested_layer_count,
                 )
 
-            self.after(
-                0,
-                lambda: self._publish_result(frame, depth, layer_masks),
+            self._processing_results.put(
+                ("result", frame, depth, layer_masks)
             )
         except Exception as error:
             print("SceneSeparation: processing error:", error)
-            self.after(
-                0,
-                lambda: self._publish_error(str(error)),
+            self._processing_results.put(
+                ("error", str(error))
             )
+
+    def _poll_processing_result(self):
+        self._poll_processing_job = None
+        if self._closing:
+            return
+
+        try:
+            while True:
+                item = self._processing_results.get_nowait()
+                if item[0] == "result":
+                    _, frame, depth, layer_masks = item
+                    self._publish_result(
+                        frame,
+                        depth,
+                        layer_masks,
+                    )
+                else:
+                    self._publish_error(item[1])
+        except queue.Empty:
+            pass
+
+        if not self._closing:
+            self._poll_processing_job = self.after(
+                50,
+                self._poll_processing_result,
+            )
+
+    def _close(self):
+        self._closing = True
+        self.processing = False
+        if self._poll_processing_job is not None:
+            try:
+                self.after_cancel(self._poll_processing_job)
+            except tk.TclError:
+                pass
+            self._poll_processing_job = None
+        self.depth_net = None
+        self.depth_session = None
+        self.segmentation_net = None
+        self.source_frame = None
+        self.depth_map = None
+        self.layer_masks = []
+        self.preview_photos = []
+        self.destroy()
 
     def _resize_for_processing(self, frame, target_width):
         if target_width <= 0:
@@ -335,7 +441,12 @@ class SceneSeparationWindow(tk.Toplevel):
             interpolation=cv2.INTER_AREA,
         )
 
-    def _estimate_depth(self, frame):
+    def _estimate_depth(
+        self,
+        frame,
+        depth_net=None,
+        depth_session=None,
+    ):
         height, width = frame.shape[:2]
         model_size = (384, 384)
         blob = cv2.dnn.blobFromImage(
@@ -358,10 +469,10 @@ class SceneSeparationWindow(tk.Toplevel):
             blob[0] - channel_means[:, None, None]
         ) / channel_stdevs[:, None, None]
 
-        if self.depth_session is not None:
-            input_name = self.depth_session.get_inputs()[0].name
-            output_name = self.depth_session.get_outputs()[0].name
-            output = self.depth_session.run(
+        if depth_session is not None:
+            input_name = depth_session.get_inputs()[0].name
+            output_name = depth_session.get_outputs()[0].name
+            output = depth_session.run(
                 [output_name],
                 {input_name: blob},
             )[0]
@@ -382,11 +493,11 @@ class SceneSeparationWindow(tk.Toplevel):
                 output /= maximum
             return output
 
-        if self.depth_net is None:
+        if depth_net is None:
             return self._fallback_depth(frame)
 
-        self.depth_net.setInput(blob)
-        output = self.depth_net.forward()
+        depth_net.setInput(blob)
+        output = depth_net.forward()
 
         output = np.asarray(output, dtype=np.float32)
         output = output.squeeze()
@@ -445,7 +556,11 @@ class SceneSeparationWindow(tk.Toplevel):
         )
         return cv2.GaussianBlur(depth.astype(np.float32), (7, 7), 1.5)
 
-    def _segment_instances(self, frame):
+    def _segment_instances(self, frame, segmentation_net=None):
+        if segmentation_net is None:
+            segmentation_net = self.segmentation_net
+        if segmentation_net is None:
+            return []
         height, width = frame.shape[:2]
         model_size = (640, 640)
         blob = cv2.dnn.blobFromImage(
@@ -455,9 +570,9 @@ class SceneSeparationWindow(tk.Toplevel):
             swapRB=True,
             crop=False,
         )
-        self.segmentation_net.setInput(blob)
-        outputs = self.segmentation_net.forward(
-            self.segmentation_net.getUnconnectedOutLayersNames()
+        segmentation_net.setInput(blob)
+        outputs = segmentation_net.forward(
+            segmentation_net.getUnconnectedOutLayersNames()
         )
         if isinstance(outputs, tuple):
             outputs = list(outputs)
@@ -507,6 +622,7 @@ class SceneSeparationWindow(tk.Toplevel):
                 (width, height),
                 interpolation=cv2.INTER_LINEAR,
             )
+            mask = np.clip(mask, -40.0, 40.0)
             mask = 1.0 / (1.0 + np.exp(-mask))
 
             cx, cy, box_width, box_height = detection[0:4]
@@ -713,42 +829,59 @@ class SceneSeparationWindow(tk.Toplevel):
         if not self.layer_masks:
             return
 
-        cache_root = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "scene_separation_cache",
-        )
-        os.makedirs(cache_root, exist_ok=True)
+        cache_root = get_scene_separation_cache_root()
+        try:
+            os.makedirs(cache_root, exist_ok=True)
+        except OSError as error:
+            self.processing_status.set(
+                "Could not create cache: " + str(error)
+            )
+            return
         session_dir = os.path.join(
             cache_root,
             uuid.uuid4().hex,
         )
-        os.makedirs(session_dir)
+        try:
+            os.makedirs(session_dir)
+        except OSError as error:
+            self.processing_status.set(
+                "Could not create export folder: " + str(error)
+            )
+            return
 
         exported_layers = []
 
-        for index, (name, rgba, _) in enumerate(self.layer_masks):
-            safe_name = "".join(
-                character if character.isalnum() or character in " -_" else "_"
-                for character in name
-            ).strip()
-            segment_number = index + 1
-            layer_name = "{} Segment {}".format(
-                self.original_layer_name,
-                segment_number,
-            )
-            output_path = os.path.join(
-                session_dir,
-                "{}_{}.png".format(segment_number, safe_name),
-            )
-            Image.fromarray(rgba, mode="RGBA").save(
-                output_path
-            )
-            exported_layers.append(
-                (
-                    layer_name,
-                    output_path,
+        try:
+            for index, (name, rgba, _) in enumerate(self.layer_masks):
+                safe_name = "".join(
+                    character
+                    if character.isalnum() or character in " -_"
+                    else "_"
+                    for character in name
                 )
+                segment_number = index + 1
+                layer_name = "{} Segment {}".format(
+                    self.original_layer_name,
+                    segment_number,
+                )
+                output_path = os.path.join(
+                    session_dir,
+                    "{}_{}.png".format(segment_number, safe_name),
+                )
+                Image.fromarray(rgba, mode="RGBA").save(
+                    output_path
+                )
+                exported_layers.append(
+                    (
+                        layer_name,
+                        output_path,
+                    )
+                )
+        except (OSError, ValueError) as error:
+            self.processing_status.set(
+                "Could not export layers: " + str(error)
             )
+            return
 
         if self.on_add_layers is not None:
             self.on_add_layers(exported_layers)

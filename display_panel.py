@@ -333,6 +333,11 @@ class DisplayPanel(tk.Frame):
             )
 
         if not capture.isOpened():
+            capture.release()
+            self._video_captures.pop(
+                clip.file_path,
+                None
+            )
 
             return None
 
@@ -456,6 +461,35 @@ class DisplayPanel(tk.Frame):
         )
 
         return image
+
+    def destroy(self):
+        if self.viewport_render_job is not None:
+            try:
+                self.after_cancel(self.viewport_render_job)
+            except tk.TclError:
+                pass
+            self.viewport_render_job = None
+
+        for capture in self._video_captures.values():
+            capture.release()
+
+        self._video_captures.clear()
+        self._video_decoder_frames.clear()
+        self._video_frame_cache.clear()
+        self._still_image_cache.clear()
+        self._still_photo_cache.clear()
+        self.viewport_photos.clear()
+
+        if self.camera_window is not None:
+            try:
+                if self.camera_window.winfo_exists():
+                    self.camera_window.destroy()
+            except tk.TclError:
+                pass
+            self.camera_window = None
+            self.camera_window_display = None
+
+        super().destroy()
 
     def _get_still_photo(
         self,
