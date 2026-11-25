@@ -8,6 +8,7 @@ from camera_manager import CameraManager
 from hand_tracker import HandTracker, HandMouseController
 from workspace import Workspace
 from editor_controller import EditorController
+from gesture_controller import GestureController
 
 # ============================================================
 # MAIN APPLICATION
@@ -45,6 +46,8 @@ class CameraViewerApp:
         self.camera_manager = CameraManager()
 
         self.hand_tracker = HandTracker()
+
+        self.gesture_controller = GestureController()
 
         self.hand_mouse = HandMouseController(smoothing=0.75)
 
@@ -309,19 +312,77 @@ class CameraViewerApp:
 
             self.hand_tracker.process(frame)
 
-            index_finger = (
-                self.hand_tracker.get_index_finger(frame)
+            # ========================================
+            # GESTURE LANDMARK SNAPSHOT
+            # ========================================
+
+            landmarks = self.hand_tracker.get_landmarks(
+                frame
             )
 
-            if index_finger is not None:
+            # ========================================
+            # TOOL GESTURES
+            # ========================================
+
+            # ========================================
+            # TOOL GESTURE DETECTION
+            # ========================================
+
+            detected_tool = (
+                self.gesture_controller.detect_tool_gesture(
+                    landmarks
+                )
+            )
+
+            tool_state = (
+                self.gesture_controller.update_tool_gesture(
+                    detected_tool
+                )
+            )
+
+            if tool_state["triggered"]:
+
+                self.editor.select_tool(
+                    tool_state["tool"]
+                )
+
+                self.set_status(
+                    f"Gesture selected {tool_state['tool']} tool"
+                )
+
+                print(
+                    "Tool selected:",
+                    tool_state["tool"]
+                )
+
+            # ========================================
+            # PINCH
+            # ========================================
+
+            pinch_clicked = (
+                self.hand_tracker.detect_pinch(
+                    frame
+                )
+            )
+
+            # ========================================
+            # POINTER
+            # ========================================
+
+            index_finger = (
+                self.hand_tracker.get_index_finger(
+                    frame
+                )
+            )
+
+            if (
+                index_finger is not None
+                and detected_tool is None
+            ):
 
                 x, y = index_finger
 
                 height, width = frame.shape[:2]
-
-                # -----------------------------
-                # Move mouse
-                # -----------------------------
 
                 self.hand_mouse.move(
                     x,
@@ -330,20 +391,8 @@ class CameraViewerApp:
                     height
                 )
 
-                # -----------------------------
-                # Detect pinch
-                # -----------------------------
-
-                pinch_clicked = (
-                    self.hand_tracker.detect_pinch(
-                        frame
-                    )
-                )
-
                 if pinch_clicked:
-
                     self.hand_mouse.click()
-
                     print("CLICK")
 
             # frame = self.hand_tracker.draw(frame)

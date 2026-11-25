@@ -24,6 +24,30 @@ class EditorController:
         return None
 
     # ========================================================
+    # DELETE
+    # ========================================================
+    def select_tool(
+        self,
+        tool_name
+    ):
+
+        valid_tools = {
+            "Select",
+            "Move",
+            "Copy",
+            "Resize",
+            "Cut",
+            "Camera View"
+        }
+
+        if tool_name not in valid_tools:
+            return
+
+        self.workspace.tools.activate_tool(
+            tool_name
+        )
+
+    # ========================================================
     # GET SELECTED LAYER
     # ========================================================
 

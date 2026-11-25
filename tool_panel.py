@@ -17,18 +17,18 @@ class ToolPanel(tk.Frame):
         tk.Label(header, text="EDIT", bg=PANEL, fg=TEXT_DIM, font=(FONT, 8)).pack(side="right")
 
         tools = [
-            ("Select", "↖", "Choose clips and layers"),
-            ("Move", "✥", "Move selected media"),
-            ("Copy", "▣", "Duplicate selection"),
-            ("Resize", "↔", "Scale selected media"),
-            ("Cut", "✂", "Split at playhead"),
-            ("Camera View", "◉", "Show camera monitor"),
+            ("Select", "↖", "👌", "Choose clips and layers"),
+            ("Move", "✥", "✊", "Move selected media"),
+            ("Copy", "▣", "C", "Duplicate selection"),
+            ("Resize", "↔", "🤞", "Scale selected media"),
+            ("Cut", "✂", "✌", "Split at playhead"),
+            ("Camera View", "◉", "", "Show camera monitor"),
         ]
 
-        for name, icon, hint in tools:
+        for name, icon, gesture, hint in tools:
             row = tk.Button(
                 self,
-                text=f"  {icon}    {name}",
+                text=f"  {icon}    {name:<12} {gesture}",
                 anchor="w",
                 command=lambda t=name: self.select_tool(t),
                 bg=PANEL,
@@ -39,7 +39,7 @@ class ToolPanel(tk.Frame):
                 bd=0,
                 highlightthickness=0,
                 cursor="hand2",
-                font=(FONT, 9),
+                font=("Segoe UI Emoji", 9),
                 padx=10,
                 pady=8,
             )
@@ -61,3 +61,17 @@ class ToolPanel(tk.Frame):
         self.current_tool = tool
         self._refresh_selection()
         print("Selected tool:", tool)
+
+
+    def activate_tool(
+        self,
+        tool_name
+    ):
+
+        self.current_tool = tool_name
+
+        # Use your existing selection method if you
+        # already have one.
+        self.select_tool(
+            tool_name
+        )

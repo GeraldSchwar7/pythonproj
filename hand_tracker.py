@@ -236,6 +236,37 @@ class HandTracker:
         return x, y
 
     # ========================================================
+    # GET LANDMARKS
+    # ========================================================
+    def get_landmarks(self, frame):
+
+        if not self.hand_detected():
+            return None
+
+        hand = self.results.hand_landmarks[0]
+
+        height, width = frame.shape[:2]
+
+        landmarks = {}
+
+        for index, landmark in enumerate(hand):
+
+            x = int(
+                landmark.x * width
+            )
+
+            y = int(
+                landmark.y * height
+            )
+
+            landmarks[index] = (
+                x,
+                y
+            )
+
+        return landmarks
+
+    # ========================================================
     # INDEX FINGER
     # ========================================================
 

@@ -6,11 +6,8 @@
 - Masking
 - Exporting
 - Fix Crashing
-
 Report:
-
 - Contribution Statement
-
 Presentation:
 
 - Make short demonstrations of the tools and effects and then during the live presentation do a quick demonstration of scene separation.

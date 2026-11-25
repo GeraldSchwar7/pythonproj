@@ -5,205 +5,415 @@ import math
 # ============================================================
 # GESTURE CONTROLLER
 #
-# Converts hand landmarks into editor gestures.
-#
-# HandTracker = WHERE is the hand?
-# GestureController = WHAT is the hand doing?
+# Interprets one cached 21-landmark snapshot from HandTracker.
 # ============================================================
-
 
 class GestureController:
 
     def __init__(self):
 
-        # --------------------------------
-        # Delete gesture
-        # --------------------------------
-
-        self.delete_hold_duration = 3.0
-
-        self.fist_start_time = None
-
-        self.delete_triggered = False
+        self.tool_hold_duration = 0.7
+        self.pending_tool = None
+        self.tool_start_time = None
+        self.active_tool = None
 
     # ========================================================
-    # FINGER DISTANCE
+    # HELPERS
     # ========================================================
 
-    def _distance(self, a, b):
+    def _distance(self, landmarks, point1, point2):
 
-        return math.sqrt(
-            (a.x - b.x) ** 2
-            + (a.y - b.y) ** 2
-            + (a.z - b.z) ** 2
+        if (
+            landmarks is None
+            or point1 not in landmarks
+            or point2 not in landmarks
+        ):
+            return None
+
+        x1, y1 = landmarks[point1]
+        x2, y2 = landmarks[point2]
+
+        return math.hypot(
+            x2 - x1,
+            y2 - y1
         )
 
-    # ========================================================
-    # FIST DETECTION
-    # ========================================================
+    def _finger_extended(
+        self,
+        landmarks,
+        tip,
+        pip,
+        mcp
+    ):
 
-    def is_fist(self, hand_landmarks):
+        tip_distance = self._distance(
+            landmarks, tip, 0
+        )
 
-        if hand_landmarks is None:
+        pip_distance = self._distance(
+            landmarks, pip, 0
+        )
+
+        mcp_distance = self._distance(
+            landmarks, mcp, 0
+        )
+
+        if (
+            tip_distance is None
+            or pip_distance is None
+            or mcp_distance is None
+        ):
             return False
 
-        if len(hand_landmarks) < 21:
+        return (
+            tip_distance > pip_distance
+            and tip_distance > mcp_distance
+        )
+
+    def _finger_states(self, landmarks):
+
+        return {
+            "index": self._finger_extended(
+                landmarks, 8, 6, 5
+            ),
+            "middle": self._finger_extended(
+                landmarks, 12, 10, 9
+            ),
+            "ring": self._finger_extended(
+                landmarks, 16, 14, 13
+            ),
+            "pinky": self._finger_extended(
+                landmarks, 20, 18, 17
+            )
+        }
+
+    # ========================================================
+    # MOVE: CLOSED FIST
+    # ========================================================
+
+    def is_fist(self, landmarks):
+
+        if landmarks is None:
             return False
 
-        # Wrist
-        wrist = hand_landmarks[0]
-
-        # Finger tips
-        index_tip = hand_landmarks[8]
-        middle_tip = hand_landmarks[12]
-        ring_tip = hand_landmarks[16]
-        pinky_tip = hand_landmarks[20]
-
-        # Finger MCP/base joints
-        index_base = hand_landmarks[5]
-        middle_base = hand_landmarks[9]
-        ring_base = hand_landmarks[13]
-        pinky_base = hand_landmarks[17]
-
-        # ----------------------------------------------------
-        # Compare each fingertip's distance to the wrist
-        # against its base joint's distance to the wrist.
-        #
-        # When curled into a fist, the fingertip moves
-        # substantially closer to the palm/wrist.
-        # ----------------------------------------------------
-
-        index_folded = (
-            self._distance(
-                index_tip,
-                wrist
-            )
-            <
-            self._distance(
-                index_base,
-                wrist
-            ) * 1.45
-        )
-
-        middle_folded = (
-            self._distance(
-                middle_tip,
-                wrist
-            )
-            <
-            self._distance(
-                middle_base,
-                wrist
-            ) * 1.45
-        )
-
-        ring_folded = (
-            self._distance(
-                ring_tip,
-                wrist
-            )
-            <
-            self._distance(
-                ring_base,
-                wrist
-            ) * 1.45
-        )
-
-        pinky_folded = (
-            self._distance(
-                pinky_tip,
-                wrist
-            )
-            <
-            self._distance(
-                pinky_base,
-                wrist
-            ) * 1.45
+        fingers = self._finger_states(
+            landmarks
         )
 
         return (
-            index_folded
-            and middle_folded
-            and ring_folded
-            and pinky_folded
+            not fingers["index"]
+            and not fingers["middle"]
+            and not fingers["ring"]
+            and not fingers["pinky"]
         )
 
     # ========================================================
-    # DELETE TIMER
+    # SELECT: OK SIGN
     # ========================================================
 
-    def update_delete_gesture(
+    def is_ok_sign(self, landmarks):
+
+        if landmarks is None:
+            return False
+
+        pinch_distance = self._distance(
+            landmarks, 4, 8
+        )
+
+        palm_size = self._distance(
+            landmarks, 0, 9
+        )
+
+        if (
+            pinch_distance is None
+            or palm_size is None
+            or palm_size == 0
+        ):
+            return False
+
+        fingers = self._finger_states(
+            landmarks
+        )
+
+        touching = (
+            pinch_distance
+            < palm_size * 0.35
+        )
+
+        return (
+            touching
+            and fingers["middle"]
+            and fingers["ring"]
+            and fingers["pinky"]
+        )
+
+    # ========================================================
+    # CUT: SCISSORS
+    # ========================================================
+
+    def is_scissors(self, landmarks):
+
+        if landmarks is None:
+            return False
+
+        fingers = self._finger_states(
+            landmarks
+        )
+
+        gap = self._distance(
+            landmarks, 8, 12
+        )
+
+        palm_size = self._distance(
+            landmarks, 0, 9
+        )
+
+        if (
+            gap is None
+            or palm_size is None
+            or palm_size == 0
+        ):
+            return False
+
+        separated = (
+            gap > palm_size * 0.30
+        )
+
+        return (
+            fingers["index"]
+            and fingers["middle"]
+            and not fingers["ring"]
+            and not fingers["pinky"]
+            and separated
+        )
+
+    # ========================================================
+    # RESIZE: L SIGN
+    # ========================================================
+
+    def is_resize_sign(self, landmarks):
+
+        if landmarks is None:
+            return False
+
+        fingers = self._finger_states(
+            landmarks
+        )
+
+        # ASL R:
+        # index + middle extended
+        # ring + pinky folded
+        if not (
+            fingers["index"]
+            and fingers["middle"]
+            and not fingers["ring"]
+            and not fingers["pinky"]
+        ):
+            return False
+
+        # Distance between index and middle fingertips
+        finger_gap = self._distance(
+            landmarks,
+            8,
+            12
+        )
+
+        # Use palm size so detection works at
+        # different distances from the camera
+        palm_size = self._distance(
+            landmarks,
+            0,
+            9
+        )
+
+        if (
+            finger_gap is None
+            or palm_size is None
+            or palm_size == 0
+        ):
+            return False
+
+        gap_ratio = (
+            finger_gap / palm_size
+        )
+
+        # R fingers should be close/crossed.
+        fingers_together = (
+            gap_ratio < 0.28
+        )
+
+        return fingers_together
+
+    # ========================================================
+    # COPY: C SIGN
+    # ========================================================
+
+    def is_copy_sign(self, landmarks):
+
+        if landmarks is None:
+            return False
+
+        thumb_tip = landmarks.get(4)
+        index_tip = landmarks.get(8)
+        middle_tip = landmarks.get(12)
+        ring_tip = landmarks.get(16)
+        pinky_tip = landmarks.get(20)
+
+        if any(
+            point is None
+            for point in (
+                thumb_tip,
+                index_tip,
+                middle_tip,
+                ring_tip,
+                pinky_tip
+            )
+        ):
+            return False
+
+        palm_size = self._distance(
+            landmarks, 0, 9
+        )
+
+        thumb_index = self._distance(
+            landmarks, 4, 8
+        )
+
+        if (
+            palm_size is None
+            or thumb_index is None
+            or palm_size == 0
+        ):
+            return False
+
+        gap_ratio = (
+            thumb_index / palm_size
+        )
+
+        c_gap = (
+            0.45
+            < gap_ratio
+            < 1.40
+        )
+
+        fingers_above_thumb = (
+            index_tip[1] < thumb_tip[1]
+            and middle_tip[1] < thumb_tip[1]
+            and ring_tip[1] < thumb_tip[1]
+        )
+
+        fingers = self._finger_states(
+            landmarks
+        )
+
+        enough_fingers = (
+            fingers["middle"]
+            or fingers["ring"]
+            or fingers["pinky"]
+        )
+
+        return (
+            c_gap
+            and fingers_above_thumb
+            and enough_fingers
+        )
+
+    # ========================================================
+    # TOOL DETECTION
+    # ========================================================
+
+    def detect_tool_gesture(
         self,
-        fist_detected
+        landmarks
     ):
 
-        # --------------------------------
-        # No fist
-        # --------------------------------
+        if landmarks is None:
+            return None
 
-        if not fist_detected:
+        if self.is_ok_sign(
+            landmarks
+        ):
+            return "Select"
 
-            self.fist_start_time = None
+        if self.is_scissors(
+            landmarks
+        ):
+            return "Cut"
 
-            self.delete_triggered = False
+        if self.is_resize_sign(
+            landmarks
+        ):
+            return "Resize"
+
+        if self.is_copy_sign(
+            landmarks
+        ):
+            return "Copy"
+
+        if self.is_fist(
+            landmarks
+        ):
+            return "Move"
+
+        return None
+
+    # ========================================================
+    # HOLD TO ACTIVATE
+    # ========================================================
+
+    def update_tool_gesture(
+        self,
+        detected_tool
+    ):
+
+        if detected_tool is None:
+
+            self.pending_tool = None
+            self.tool_start_time = None
 
             return {
                 "active": False,
+                "tool": None,
                 "progress": 0.0,
-                "remaining":
-                    self.delete_hold_duration,
                 "triggered": False
             }
 
-        # --------------------------------
-        # Fist just started
-        # --------------------------------
+        if detected_tool != self.pending_tool:
 
-        if self.fist_start_time is None:
-
-            self.fist_start_time = (
+            self.pending_tool = detected_tool
+            self.tool_start_time = (
                 time.monotonic()
             )
 
-        # --------------------------------
-        # Timer
-        # --------------------------------
+            return {
+                "active": True,
+                "tool": detected_tool,
+                "progress": 0.0,
+                "triggered": False
+            }
 
         elapsed = (
             time.monotonic()
-            - self.fist_start_time
+            - self.tool_start_time
         )
 
         progress = min(
-            elapsed
-            / self.delete_hold_duration,
+            elapsed / self.tool_hold_duration,
             1.0
         )
-
-        remaining = max(
-            self.delete_hold_duration
-            - elapsed,
-            0.0
-        )
-
-        # --------------------------------
-        # Trigger delete ONCE
-        # --------------------------------
 
         triggered = False
 
         if (
             progress >= 1.0
-            and not self.delete_triggered
+            and self.active_tool != detected_tool
         ):
-
-            self.delete_triggered = True
-
+            self.active_tool = detected_tool
             triggered = True
 
         return {
             "active": True,
+            "tool": detected_tool,
             "progress": progress,
-            "remaining": remaining,
             "triggered": triggered
         }
