@@ -128,7 +128,8 @@ class Workspace(tk.Frame):
 
         self.layer_effects = LayerEffectsPanel(
             self,
-            on_scene_separation=self._open_scene_separation
+            on_scene_separation=self._open_scene_separation,
+            on_hue_saturation=self._open_hue_saturation,
         )
 
         self.layer_effects.grid(
@@ -251,6 +252,20 @@ class Workspace(tk.Frame):
     def _on_layer_selected(self, layer):
         self.layer_effects.set_layer(layer)
 
+    def _open_hue_saturation(self):
+        if self.timeline.selected_clip is None:
+            return
+
+        window = tk.Toplevel(self)
+        window.title("Hue/Saturation")
+        window.geometry("400x300")
+        window.minsize(300, 200)
+        window.transient(self.winfo_toplevel())
+        window.protocol(
+            "WM_DELETE_WINDOW",
+            window.destroy,
+        )
+
     def _open_scene_separation(self):
         selected_clip = self.timeline.selected_clip
         if selected_clip is None:
@@ -278,7 +293,7 @@ class Workspace(tk.Frame):
         def close_scene_separation():
             if window in self.scene_separation_windows:
                 self.scene_separation_windows.remove(window)
-            window.destroy()
+            window._close()
 
         window.protocol("WM_DELETE_WINDOW", close_scene_separation)
 

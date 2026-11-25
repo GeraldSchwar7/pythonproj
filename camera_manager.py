@@ -18,14 +18,15 @@ class CameraManager:
 
             cap = cv2.VideoCapture(index)
 
-            if cap.isOpened():
+            try:
+                if cap.isOpened():
 
-                ret, _ = cap.read()
+                    ret, _ = cap.read()
 
-                if ret:
-                    cameras.append(index)
-
-            cap.release()
+                    if ret:
+                        cameras.append(index)
+            finally:
+                cap.release()
 
         return cameras
 
@@ -36,7 +37,12 @@ class CameraManager:
         self.camera_index = camera_index
         self.cap = cv2.VideoCapture(camera_index)
 
-        return self.cap.isOpened()
+        if self.cap.isOpened():
+            return True
+
+        self.cap.release()
+        self.cap = None
+        return False
 
     def read_frame(self):
 

@@ -19,6 +19,8 @@ class CameraViewerApp:
     def __init__(self, root):
 
         self.root = root
+        self._closing = False
+        self._update_frame_job = None
 
         self.root.title(
             "Project Monday"
@@ -291,18 +293,39 @@ class CameraViewerApp:
     def update_frame(self):
 
         # ========================================
+        self._update_frame_job = None
+        if self._closing:
+            return
+
         # READ CAMERA
         # ========================================
 
-        ret, frame = self.camera_manager.read_frame()
+        try:
+            ret, frame = self.camera_manager.read_frame()
+        except Exception as error:
+            print("Camera read error:", error)
+            ret, frame = False, None
 
         if not ret or frame is None:
             self.set_status("Camera frame unavailable")
-            self.root.after(30, self.update_frame)
+            if not self._closing:
+                self._update_frame_job = self.root.after(
+                    30,
+                    self.update_frame,
+                )
             return
 
         # Mirror the camera
-        frame = cv2.flip(frame, 1)
+        try:
+            frame = cv2.flip(frame, 1)
+        except Exception as error:
+            print("Camera frame error:", error)
+            if not self._closing:
+                self._update_frame_job = self.root.after(
+                    30,
+                    self.update_frame,
+                )
+            return
 
         # ========================================
         # HAND TRACKING
@@ -451,7 +474,7 @@ class CameraViewerApp:
         # NEXT FRAME
         # ========================================
 
-        self.root.after(
+        self._update_frame_job = self.root.after(
             15,
             self.update_frame
         )
@@ -470,9 +493,46 @@ class CameraViewerApp:
     # ========================================================
 
     def on_close(self):
+        if self._closing:
+            return
+
+        self._closing = True
+
+        if self._update_frame_job is not None:
+            try:
+                self.root.after_cancel(self._update_frame_job)
+            except tk.TclError:
+                pass
+            self._update_frame_job = None
+
+        if hasattr(self.workspace, "timeline"):
+            try:
+                self.workspace.timeline.pause_playback()
+            except Exception as error:
+                print("Shutdown: could not stop playback:", error)
+
+        for window in list(
+            getattr(
+                self.workspace,
+                "scene_separation_windows",
+                [],
+            )
+        ):
+            try:
+                window._close()
+            except Exception as error:
+                print("Shutdown: could not close scene separation:", error)
 
         self.camera_manager.release()
 
-        self.hand_tracker.close()
+        try:
+            self.hand_tracker.close()
+        except Exception as error:
+            print("Shutdown: could not close hand tracker:", error)
+
+        try:
+            self.workspace.display.destroy()
+        except Exception as error:
+            print("Shutdown: could not destroy display:", error)
 
         self.root.destroy()

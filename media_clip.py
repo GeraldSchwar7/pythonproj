@@ -88,32 +88,33 @@ class MediaClip:
             self.file_path
         )
 
-        if not capture.isOpened():
-            return
+        try:
+            if not capture.isOpened():
+                return
 
-        self.fps = float(
-            capture.get(
-                cv2.CAP_PROP_FPS
-            ) or 0.0
-        )
-
-        self.frame_count = int(
-            capture.get(
-                cv2.CAP_PROP_FRAME_COUNT
-            ) or 0
-        )
-
-        if (
-            self.fps > 0
-            and self.frame_count > 0
-        ):
-
-            self.source_duration = (
-                self.frame_count
-                / self.fps
+            self.fps = float(
+                capture.get(
+                    cv2.CAP_PROP_FPS
+                ) or 0.0
             )
 
-        capture.release()
+            self.frame_count = int(
+                capture.get(
+                    cv2.CAP_PROP_FRAME_COUNT
+                ) or 0
+            )
+
+            if (
+                self.fps > 0
+                and self.frame_count > 0
+            ):
+
+                self.source_duration = (
+                    self.frame_count
+                    / self.fps
+                )
+        finally:
+            capture.release()
 
     # ======================================================
     # END TIME

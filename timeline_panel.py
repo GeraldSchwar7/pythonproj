@@ -130,6 +130,9 @@ class TimelinePanel(tk.Frame):
         self.canvas.bind("<Motion>", self._mouse_moved)
         self.canvas.bind("<Double-Button-1>", self._rename_layer_from_canvas)
         self.canvas.bind("<Shift-MouseWheel>", self._horizontal_wheel)
+        self.canvas.bind("<MouseWheel>", self._vertical_wheel)
+        self.canvas.bind("<Button-4>", self._vertical_wheel)
+        self.canvas.bind("<Button-5>", self._vertical_wheel)
 
         self._history_state = self._capture_timeline_state()
         self._update_history_buttons()
@@ -828,7 +831,22 @@ class TimelinePanel(tk.Frame):
         self.canvas.xview_moveto(min(1.0, desired_left / total_width))
 
     def _horizontal_wheel(self, event):
-        self.canvas.xview_scroll(int(-event.delta / 120), "units")
+        delta = getattr(event, "delta", 0)
+        if delta:
+            amount = int(-delta / 120)
+        else:
+            amount = -1 if getattr(event, "num", None) == 4 else 1
+        self.canvas.xview_scroll(amount, "units")
+        return "break"
+
+    def _vertical_wheel(self, event):
+        delta = getattr(event, "delta", 0)
+        if delta:
+            amount = int(-delta / 120)
+        else:
+            amount = -1 if getattr(event, "num", None) == 4 else 1
+        self.canvas.yview_scroll(amount, "units")
+        return "break"
 
     def redraw(self):
         self.canvas.delete("all")
