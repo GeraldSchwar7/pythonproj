@@ -1,7 +1,7 @@
 
+import math
 import os
 import time
-import math
 
 import cv2
 import mediapipe as mp
@@ -24,7 +24,8 @@ class HandTracker:
         detection_confidence=0.5,
         tracking_confidence=0.5,
         tracking_width=480,
-        click_debounce=0.25
+        click_debounce=0.06,
+        click_hold_duration=2.0
     ):
 
         # ----------------------------------------------------
@@ -86,15 +87,27 @@ class HandTracker:
 
         # Pinch / click state
         self.is_pinching = False
-        self.last_click_time = 0.0
         self.click_debounce = max(0.0, float(click_debounce))
-        self.pinch_start_time = None
+        self.click_hold_duration = max(
+            0.0,
+            float(click_hold_duration)
+        )
         self.pinch_release_time = 0.0
-        self.drag_threshold = 0.18
-        self.drag_movement_threshold = 8.0
+        self.pinch_suppressed_until = 0.0
+        self.pinch_cancel_cooldown = 0.22
+        self.pinch_missing_since = None
+        self.pinch_tracking_grace = 0.10
+        self.pinch_release_threshold_ratio = 0.42
+        self.pinch_engage_threshold_ratio = 0.30
+        self.drag_movement_threshold = 12.0
         self.pinch_start_position = None
         self.pinch_last_position = None
         self.pinch_dragging = False
+        self.pinch_drag_frames = 0
+        self.pinch_release_frames = 0
+        self.pinch_release_confirm_frames = 2
+        self.pinch_start_time = None
+        self.pinch_click_fired = False
 
         # Distance between thumb and index that counts as a pinch.
         # We'll tune this if needed.
@@ -287,6 +300,21 @@ class HandTracker:
             8
         )
 
+    def get_palm_center(self, frame):
+        palm_landmarks = (0, 5, 9, 13, 17)
+        points = [
+            self.get_landmark(frame, landmark_id)
+            for landmark_id in palm_landmarks
+        ]
+        if any(point is None for point in points):
+            return None
+        valid_points = [point for point in points if point is not None]
+
+        return (
+            sum(point[0] for point in valid_points) / len(valid_points),
+            sum(point[1] for point in valid_points) / len(valid_points)
+        )
+
     # ========================================================
     # THUMB
     # ========================================================
@@ -348,76 +376,218 @@ class HandTracker:
         state = self.update_pinch(frame)
         return state["pressed"]
 
+    def cancel_pinch(self):
+        current_time = time.monotonic()
+        self.pinch_release_time = current_time
+        self.pinch_suppressed_until = (
+            current_time + self.pinch_cancel_cooldown
+        )
+        state = {
+            "pinching": False,
+            "pressed": False,
+            "clicked": False,
+            "tap": False,
+            "released": self.is_pinching,
+            "dragging": self.pinch_dragging,
+            "drag_offset": (0.0, 0.0),
+            "cancelled": True
+        }
+        self._reset_pinch_state()
+        return state
+
     def update_pinch(self, frame):
         distance = self.get_distance(frame, 4, 8)
+        palm_size = self.get_distance(frame, 0, 9)
         try:
-            index_position = self.get_index_finger(frame)
+            hand_position = self.get_palm_center(frame)
         except (AttributeError, TypeError):
-            index_position = None
+            hand_position = None
         current_time = time.monotonic()
-
-        if distance is None:
-            distance = self.pinch_threshold + 1
-
-        pinching = distance < self.pinch_threshold
+        cancelled = False
         pressed = False
+        clicked = False
+        tap = False
         released = False
         dragging = False
+        drag_offset = (0.0, 0.0)
+        if (
+            self.is_pinching
+            and self.pinch_start_position is not None
+            and self.pinch_last_position is not None
+        ):
+            drag_offset = (
+                self.pinch_last_position[0] - self.pinch_start_position[0],
+                self.pinch_last_position[1] - self.pinch_start_position[1]
+            )
 
-        if pinching:
-            if not self.is_pinching:
-                if current_time - self.last_click_time < self.click_debounce:
+        if distance is None:
+            if self.is_pinching:
+                if self.pinch_missing_since is None:
+                    self.pinch_missing_since = current_time
+                if (
+                    current_time - self.pinch_missing_since
+                    <= self.pinch_tracking_grace
+                ):
                     return {
                         "pinching": True,
                         "pressed": False,
+                        "clicked": False,
+                        "tap": False,
                         "released": False,
-                        "dragging": False
+                        "dragging": self.pinch_dragging,
+                        "drag_offset": drag_offset,
+                        "cancelled": False
+                    }
+
+                released = True
+                cancelled = True
+                dragging = self.pinch_dragging
+                self._reset_pinch_state()
+            return {
+                "pinching": False,
+                "pressed": False,
+                "clicked": False,
+                "tap": False,
+                "released": released,
+                "dragging": dragging,
+                "drag_offset": drag_offset,
+                "cancelled": cancelled
+            }
+
+        self.pinch_missing_since = None
+        if palm_size is not None and palm_size > 0:
+            pinch_ratio = distance / palm_size
+            threshold = (
+                self.pinch_release_threshold_ratio
+                if self.is_pinching
+                else self.pinch_engage_threshold_ratio
+            )
+            pinching = pinch_ratio <= threshold
+        else:
+            threshold = (
+                self.pinch_threshold * 1.35
+                if self.is_pinching
+                else self.pinch_threshold
+            )
+            pinching = distance <= threshold
+
+        if pinching:
+            self.pinch_release_frames = 0
+            if not self.is_pinching:
+                if current_time < self.pinch_suppressed_until:
+                    return {
+                        "pinching": True,
+                        "pressed": False,
+                        "clicked": False,
+                        "tap": False,
+                        "released": False,
+                        "dragging": False,
+                        "drag_offset": drag_offset,
+                        "cancelled": False
+                    }
+                if (
+                    current_time - self.pinch_release_time
+                    < self.click_debounce
+                ):
+                    return {
+                        "pinching": True,
+                        "pressed": False,
+                        "clicked": False,
+                        "tap": False,
+                        "released": False,
+                        "dragging": False,
+                        "drag_offset": drag_offset,
+                        "cancelled": False
                     }
 
                 self.is_pinching = True
                 self.pinch_start_time = current_time
-                self.pinch_start_position = index_position
-                self.pinch_last_position = index_position
+                self.pinch_start_position = hand_position
+                self.pinch_last_position = hand_position
                 self.pinch_dragging = False
+                self.pinch_drag_frames = 0
+                self.pinch_click_fired = False
                 pressed = True
 
-            if index_position is not None:
+            if hand_position is not None:
                 if self.pinch_start_position is not None:
+                    drag_offset = (
+                        hand_position[0] - self.pinch_start_position[0],
+                        hand_position[1] - self.pinch_start_position[1]
+                    )
                     movement = math.hypot(
-                        index_position[0] - self.pinch_start_position[0],
-                        index_position[1] - self.pinch_start_position[1]
+                        hand_position[0] - self.pinch_start_position[0],
+                        hand_position[1] - self.pinch_start_position[1]
                     )
                 else:
+                    self.pinch_start_position = hand_position
                     movement = 0.0
 
-                held_long_enough = (
-                    self.pinch_start_time is not None
-                    and current_time - self.pinch_start_time >= self.drag_threshold
-                )
-                if movement >= self.drag_movement_threshold or held_long_enough:
-                    self.pinch_dragging = True
+                if (
+                    movement >= self.drag_movement_threshold
+                    and not self.pinch_click_fired
+                ):
+                    self.pinch_drag_frames += 1
+                    if self.pinch_drag_frames >= 2:
+                        self.pinch_dragging = True
+                else:
+                    self.pinch_drag_frames = 0
 
-                self.pinch_last_position = index_position
+                self.pinch_last_position = hand_position
+
+                if (
+                    not self.pinch_dragging
+                    and not self.pinch_click_fired
+                    and movement < self.drag_movement_threshold
+                    and self.pinch_start_time is not None
+                    and current_time - self.pinch_start_time
+                    >= self.click_hold_duration
+                ):
+                    clicked = True
+                    self.pinch_click_fired = True
 
             dragging = self.pinch_dragging
 
         elif self.is_pinching:
+            self.pinch_release_frames += 1
+            if self.pinch_release_frames < self.pinch_release_confirm_frames:
+                return {
+                    "pinching": True,
+                    "pressed": False,
+                    "clicked": False,
+                    "tap": False,
+                    "released": False,
+                    "dragging": self.pinch_dragging,
+                    "drag_offset": drag_offset,
+                    "cancelled": False
+                }
             released = True
             dragging = self.pinch_dragging
+            tap = not self.pinch_dragging and not self.pinch_click_fired
             self.pinch_release_time = current_time
-            self.last_click_time = current_time
-            self.is_pinching = False
-            self.pinch_start_time = None
-            self.pinch_dragging = False
-            self.pinch_start_position = None
-            self.pinch_last_position = None
+            self._reset_pinch_state()
 
         return {
             "pinching": pinching,
             "pressed": pressed,
+            "clicked": clicked,
+            "tap": tap,
             "released": released,
-            "dragging": dragging
+            "dragging": dragging,
+            "drag_offset": drag_offset,
+            "cancelled": cancelled
         }
+
+    def _reset_pinch_state(self):
+        self.is_pinching = False
+        self.pinch_start_time = None
+        self.pinch_missing_since = None
+        self.pinch_dragging = False
+        self.pinch_drag_frames = 0
+        self.pinch_release_frames = 0
+        self.pinch_click_fired = False
+        self.pinch_start_position = None
+        self.pinch_last_position = None
 
     # ========================================================
     # DRAW HAND
@@ -589,15 +759,18 @@ class HandMouseController:
         self.move_interval = 1 / 60
 
         # Ignore extremely tiny movements.
-        self.deadzone = 2
+        self.deadzone = 0.0
+        self.last_sent_x = int(self.current_x)
+        self.last_sent_y = int(self.current_y)
         self.is_mouse_down = False
-        self.last_click_time = 0.0
-        self.last_click_x = 0.0
-        self.last_click_y = 0.0
-        self.double_click_interval = 0.35
-        self.double_click_distance = 28
-        self.acceleration = 1.25
-        self.max_acceleration = 2.2
+        self.drag_origin_x = self.current_x
+        self.drag_origin_y = self.current_y
+        self.filter_raw_x = self.current_x
+        self.filter_raw_y = self.current_y
+        self.filter_velocity_x = 0.0
+        self.filter_velocity_y = 0.0
+        self.filter_cutoff = 0.7 + 1.6 * (1.0 - self.smoothing)
+        self.filter_beta = 0.012
 
     # ========================================================
     # ENABLE
@@ -612,7 +785,7 @@ class HandMouseController:
     # ========================================================
 
     def disable(self):
-
+        self.mouse_up()
         self.enabled = False
 
     # ========================================================
@@ -622,6 +795,8 @@ class HandMouseController:
     def toggle(self):
 
         self.enabled = not self.enabled
+        if not self.enabled:
+            self.mouse_up()
 
         return self.enabled
 
@@ -633,32 +808,13 @@ class HandMouseController:
     def click(self):
         if not self.enabled:
             return
-        current_time = time.monotonic()
-        distance = math.hypot(
-            self.current_x - self.last_click_x,
-            self.current_y - self.last_click_y
-        )
-        is_double = (
-            current_time - self.last_click_time <= self.double_click_interval
-            and distance <= self.double_click_distance
-            and self.last_click_time > 0
+        pyautogui.click(
+            int(self.current_x),
+            int(self.current_y)
         )
 
-        if is_double:
-            pyautogui.doubleClick(
-                int(self.current_x),
-                int(self.current_y)
-            )
-            self.last_click_time = 0.0
-        else:
-            pyautogui.click(
-                int(self.current_x),
-                int(self.current_y)
-            )
-            self.last_click_time = current_time
-
-        self.last_click_x = self.current_x
-        self.last_click_y = self.current_y
+    def tap(self):
+        self.click()
 
     def mouse_down(self):
         if not self.enabled or self.is_mouse_down:
@@ -669,9 +825,11 @@ class HandMouseController:
             button="left"
         )
         self.is_mouse_down = True
+        self.drag_origin_x = self.current_x
+        self.drag_origin_y = self.current_y
 
     def mouse_up(self):
-        if not self.enabled or not self.is_mouse_down:
+        if not self.is_mouse_down:
             return
         pyautogui.mouseUp(
             int(self.current_x),
@@ -680,6 +838,30 @@ class HandMouseController:
         )
         self.is_mouse_down = False
 
+    def move_drag(
+        self,
+        offset_x,
+        offset_y,
+        frame_width,
+        frame_height
+    ):
+        if not self.enabled or not self.is_mouse_down:
+            return
+        usable_width = frame_width * (1.0 - 2.0 * self.margin)
+        usable_height = frame_height * (1.0 - 2.0 * self.margin)
+        if usable_width <= 0 or usable_height <= 0:
+            return
+        current_time = time.monotonic()
+        if current_time - self.last_move_time < self.move_interval:
+            return
+        target_x = self.drag_origin_x + offset_x * (
+            (self.screen_width - 1) / usable_width
+        )
+        target_y = self.drag_origin_y + offset_y * (
+            (self.screen_height - 1) / usable_height
+        )
+        self._move_to(target_x, target_y, current_time)
+
     def move(
         self,
         finger_x,
@@ -687,196 +869,80 @@ class HandMouseController:
         frame_width,
         frame_height
     ):
-
         if not self.enabled:
             return
-
         current_time = time.monotonic()
-
-        if (
-            current_time - self.last_move_time
-            < self.move_interval
-        ):
+        if current_time - self.last_move_time < self.move_interval:
             return
-
-        # ----------------------------------------------------
-        # Active camera area
-        # ----------------------------------------------------
-
-        margin_x = (
-            frame_width
-            * self.margin
-        )
-
-        margin_y = (
-            frame_height
-            * self.margin
-        )
-
-        usable_width = (
-            frame_width
-            - (2 * margin_x)
-        )
-
-        usable_height = (
-            frame_height
-            - (2 * margin_y)
-        )
-
-        if (
-            usable_width <= 0
-            or usable_height <= 0
-        ):
+        margin_x = frame_width * self.margin
+        margin_y = frame_height * self.margin
+        usable_width = frame_width - (2 * margin_x)
+        usable_height = frame_height - (2 * margin_y)
+        if usable_width <= 0 or usable_height <= 0:
             return
+        normalized_x = max(0.0, min(1.0, (finger_x - margin_x) / usable_width))
+        normalized_y = max(0.0, min(1.0, (finger_y - margin_y) / usable_height))
+        target_x = normalized_x * (self.screen_width - 1)
+        target_y = normalized_y * (self.screen_height - 1)
+        self._move_to(target_x, target_y, current_time)
 
+    def _move_to(self, target_x, target_y, current_time):
         elapsed = (
             1 / 60
             if self.last_move_time == 0
             else current_time - self.last_move_time
         )
+        elapsed = max(0.005, min(elapsed, 0.1))
         self.last_move_time = current_time
 
-        # ----------------------------------------------------
-        # Normalize finger position
-        # ----------------------------------------------------
-
-        normalized_x = (
-            (finger_x - margin_x)
-            / usable_width
-        )
-
-        normalized_y = (
-            (finger_y - margin_y)
-            / usable_height
-        )
-
-        normalized_x = max(
-            0.0,
-            min(
-                1.0,
-                normalized_x
+        def filter_axis(target, previous, raw_previous, velocity_previous):
+            raw_velocity = (target - raw_previous) / elapsed
+            derivative_alpha = 1.0 / (
+                1.0 + 1.0 / (2.0 * math.pi * 1.0 * elapsed)
             )
-        )
-
-        normalized_y = max(
-            0.0,
-            min(
-                1.0,
-                normalized_y
+            velocity = (
+                derivative_alpha * raw_velocity
+                + (1.0 - derivative_alpha) * velocity_previous
             )
-        )
-
-        # ----------------------------------------------------
-        # Convert to monitor position
-        # ----------------------------------------------------
-
-        target_x = (
-            normalized_x
-            * (self.screen_width - 1)
-        )
-
-        target_y = (
-            normalized_y
-            * (self.screen_height - 1)
-        )
-
-        # ----------------------------------------------------
-        # Smooth
-        # ----------------------------------------------------
-
-        smoothing_step = min(
-            max(elapsed / (1 / 60), 0.0),
-            4.0
-        )
-        alpha = 1.0 - (
-            (1.0 - self.smoothing) ** smoothing_step
-        )
-
-        camera_distance = math.hypot(
-            target_x - self.current_x,
-            target_y - self.current_y
-        )
-        speed_ratio = min(
-            camera_distance / 180.0,
-            1.0
-        )
-        acceleration_alpha = (
-            1.0
-            - (
-                1.0 - alpha
+            cutoff = self.filter_cutoff + self.filter_beta * abs(velocity)
+            alpha = 1.0 / (
+                1.0 + 1.0 / (2.0 * math.pi * cutoff * elapsed)
             )
-            * (
-                1.0
-                - (
-                    0.55
-                    * speed_ratio
-                )
-            )
-        )
-        alpha = max(
-            alpha,
-            min(acceleration_alpha, 1.0)
-        )
+            filtered = alpha * target + (1.0 - alpha) * previous
+            return filtered, velocity
 
-        new_x = (
-            self.current_x
-            + (
-                target_x
-                - self.current_x
-            )
-            * alpha
+        new_x, self.filter_velocity_x = filter_axis(
+            target_x,
+            self.current_x,
+            self.filter_raw_x,
+            self.filter_velocity_x
         )
-
-        new_y = (
-            self.current_y
-            + (
-                target_y
-                - self.current_y
-            )
-            * alpha
+        new_y, self.filter_velocity_y = filter_axis(
+            target_y,
+            self.current_y,
+            self.filter_raw_y,
+            self.filter_velocity_y
         )
-
-        # ----------------------------------------------------
-        # Ignore tiny movements
-        # ----------------------------------------------------
+        self.filter_raw_x = target_x
+        self.filter_raw_y = target_y
 
         movement = math.hypot(
             new_x - self.current_x,
             new_y - self.current_y
         )
-
         if movement < self.deadzone:
             return
 
-        self.current_x = new_x
-        self.current_y = new_y
-
-        # ----------------------------------------------------
-        # Clamp
-        # ----------------------------------------------------
-
-        self.current_x = max(
-            0,
-            min(
-                self.screen_width - 1,
-                self.current_x
-            )
-        )
-
-        self.current_y = max(
-            0,
-            min(
-                self.screen_height - 1,
-                self.current_y
-            )
-        )
-
-        # ----------------------------------------------------
-        # Move Windows cursor
-        # ----------------------------------------------------
-
+        self.current_x = max(0, min(self.screen_width - 1, new_x))
+        self.current_y = max(0, min(self.screen_height - 1, new_y))
+        screen_x = int(self.current_x)
+        screen_y = int(self.current_y)
+        if screen_x == self.last_sent_x and screen_y == self.last_sent_y:
+            return
         pyautogui.moveTo(
-            int(self.current_x),
-            int(self.current_y),
+            screen_x,
+            screen_y,
             duration=0
         )
+        self.last_sent_x = screen_x
+        self.last_sent_y = screen_y

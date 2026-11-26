@@ -47,6 +47,7 @@ class AssetBrowser(tk.Frame):
         # ==================================================
 
         self.assets = []
+        self.asset_buttons = []
 
         # Keep PhotoImage references alive.
         self.thumbnail_images = []
@@ -238,6 +239,7 @@ class AssetBrowser(tk.Frame):
                 relief="flat",
                 cursor="hand2"
             )
+            self.asset_buttons.append(button)
 
             button.pack()
 
@@ -433,6 +435,21 @@ class AssetBrowser(tk.Frame):
     # ======================================================
     # FINISH DRAG
     # ======================================================
+
+    def contains_asset_at_screen(self, x, y):
+        for button in self.asset_buttons:
+            if not button.winfo_exists():
+                continue
+
+            left = button.winfo_rootx()
+            top = button.winfo_rooty()
+            if (
+                left <= x < left + button.winfo_width()
+                and top <= y < top + button.winfo_height()
+            ):
+                return True
+
+        return False
 
     def _finish_drag(
         self,

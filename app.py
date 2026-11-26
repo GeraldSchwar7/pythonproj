@@ -21,6 +21,7 @@ class CameraViewerApp:
         self.root = root
         self._closing = False
         self._update_frame_job = None
+        self.pinch_asset_drag_allowed = False
 
         self.root.title(
             "Project Monday"
@@ -254,7 +255,7 @@ class CameraViewerApp:
         )
 
         tk.Label(
-            status_frame, text="HAND CONTROL  •  PINCH TO CLICK",
+            status_frame, text="PINCH = CLICK  •  ASSET → TIMELINE = DRAG",
             bg=PANEL, fg=TEXT_DIM, font=(FONT, 8, "bold")
         ).pack(side="right", padx=14, pady=5)
 
@@ -351,79 +352,7 @@ class CameraViewerApp:
             # TOOL GESTURE DETECTION
             # ========================================
 
-            detected_tool = (
-                self.gesture_controller.detect_tool_gesture(
-                    landmarks
-                )
-            )
-
-            tool_state = (
-                self.gesture_controller.update_tool_gesture(
-                    detected_tool
-                )
-            )
-
-            if tool_state["triggered"]:
-
-                self.editor.select_tool(
-                    tool_state["tool"]
-                )
-
-                self.set_status(
-                    f"Gesture selected {tool_state['tool']} tool"
-                )
-
-                print(
-                    "Tool selected:",
-                    tool_state["tool"]
-                )
-
-            # ========================================
-            # PINCH
-            # ========================================
-
-            # ========================================
-            # POINTER
-            # ========================================
-
-            index_finger = (
-                self.hand_tracker.get_index_finger(
-                    frame
-                )
-            )
-
-            if (
-                index_finger is not None
-                and detected_tool is None
-            ):
-
-                x, y = index_finger
-
-                height, width = frame.shape[:2]
-
-                self.hand_mouse.move(
-                    x,
-                    y,
-                    width,
-                    height
-                )
-
-            pinch_state = (
-                self.hand_tracker.update_pinch(
-                    frame
-                )
-            )
-
-            if pinch_state["dragging"]:
-                self.hand_mouse.mouse_down()
-
-            if pinch_state["released"]:
-                if self.hand_mouse.is_mouse_down:
-                    self.hand_mouse.mouse_up()
-                    print("DRAG RELEASE")
-                else:
-                    self.hand_mouse.click()
-                    print("CLICK")
+            self._process_hand_controls(frame, landmarks)
 
             # frame = self.hand_tracker.draw(frame)
 
@@ -485,6 +414,90 @@ class CameraViewerApp:
             15,
             self.update_frame
         )
+
+    def _process_hand_controls(self, frame, landmarks):
+        detected_tool = self.gesture_controller.detect_tool_gesture(
+            landmarks
+        )
+        pinch_state = self.hand_tracker.update_pinch(frame)
+
+        tool_gesture = (
+            detected_tool
+            if detected_tool == "Select"
+            else (
+                None
+                if pinch_state["pinching"] or pinch_state["dragging"]
+                else detected_tool
+            )
+        )
+        tool_state = self.gesture_controller.update_tool_gesture(
+            tool_gesture
+        )
+
+        if tool_state["triggered"]:
+            self.editor.select_tool(tool_state["tool"])
+            self.set_status(
+                f"Gesture selected {tool_state['tool']} tool"
+            )
+            print("Tool selected:", tool_state["tool"])
+
+        if (
+            tool_state["active"]
+            and tool_state["progress"] >= 1.0
+        ):
+            pinch_state = self.hand_tracker.cancel_pinch()
+
+        if pinch_state["pressed"]:
+            self.pinch_asset_drag_allowed = (
+                self.workspace.assets.contains_asset_at_screen(
+                    self.hand_mouse.current_x,
+                    self.hand_mouse.current_y
+                )
+            )
+            if self.pinch_asset_drag_allowed:
+                self.hand_mouse.mouse_down()
+            else:
+                self.hand_mouse.click()
+
+        index_finger = self.hand_tracker.get_index_finger(frame)
+        if (
+            index_finger is not None
+            and not pinch_state["pinching"]
+            and not (
+                pinch_state["dragging"]
+                and self.hand_mouse.is_mouse_down
+            )
+        ):
+            height, width = frame.shape[:2]
+            self.hand_mouse.move(
+                index_finger[0],
+                index_finger[1],
+                width,
+                height
+            )
+
+        if (
+            pinch_state["pinching"]
+            and pinch_state["dragging"]
+            and self.pinch_asset_drag_allowed
+        ):
+            if not self.hand_mouse.is_mouse_down:
+                self.hand_mouse.mouse_down()
+            height, width = frame.shape[:2]
+            offset_x, offset_y = pinch_state["drag_offset"]
+            self.hand_mouse.move_drag(
+                offset_x,
+                offset_y,
+                width,
+                height
+            )
+
+        if pinch_state["released"] or pinch_state["cancelled"]:
+            if self.hand_mouse.is_mouse_down:
+                self.hand_mouse.mouse_up()
+                print("DRAG RELEASE")
+            self.pinch_asset_drag_allowed = False
+
     # ========================================================
     # STATUS
     # ========================================================

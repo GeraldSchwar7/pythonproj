@@ -12,7 +12,7 @@ class GestureController:
 
     def __init__(self):
 
-        self.tool_hold_duration = 0.7
+        self.tool_hold_duration = 2.0
         self.tool_release_debounce = 0.15
         self.pending_tool = None
         self.tool_start_time = None
@@ -110,7 +110,7 @@ class GestureController:
         )
 
     # ========================================================
-    # SELECT: OK SIGN
+    # LEGACY OK-SIGN DETECTION
     # ========================================================
 
     def is_ok_sign(self, landmarks):
@@ -147,6 +147,25 @@ class GestureController:
             and fingers["middle"]
             and fingers["ring"]
             and fingers["pinky"]
+        )
+
+    # SELECT: OK SIGN
+    def is_open_palm(self, landmarks):
+        if landmarks is None:
+            return False
+
+        fingers = self._finger_states(landmarks)
+        thumb_tip = self._distance(landmarks, 4, 0)
+        thumb_ip = self._distance(landmarks, 3, 0)
+        thumb_mcp = self._distance(landmarks, 2, 0)
+
+        return (
+            all(fingers.values())
+            and thumb_tip is not None
+            and thumb_ip is not None
+            and thumb_mcp is not None
+            and thumb_tip > thumb_ip
+            and thumb_tip > thumb_mcp
         )
 
     # ========================================================

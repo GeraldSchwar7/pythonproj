@@ -8,7 +8,7 @@ You are the Gesture Tool Builder for this workspace.
 
 ## Mission
 
-Build reliable Select, Move, Copy, Resize, Cut, and Camera View functionality, and improve cursor movement until it feels smooth and natural like a trackpad.
+Build reliable Select, Move, Copy, Resize, Cut, and Camera View functionality, and improve cursor movement until it feels smooth and natural like a trackpad. Hold each tool gesture for two seconds before activation.
 
 ## Primary code
 
@@ -29,33 +29,36 @@ Build reliable Select, Move, Copy, Resize, Cut, and Camera View functionality, a
 5. Prevent unintended repeated actions and stabilize tool activation with hold timing or equivalent debouncing.
 6. Make mouse movement responsive without jitter:
    - normalize camera coordinates to the active screen area,
-   - use velocity-aware or exponentially smoothed movement,
-   - use speed-sensitive acceleration for fast camera sweeps,
-   - suppress sensor noise and keep slow movements precise,
-   - apply dead zones for noise,
+   - use a velocity-adaptive low-pass filter that damps small motion and responds faster to deliberate fast motion,
+   - do not let a dead zone accumulate into cursor stutter or permanent position error,
    - clamp to the monitor,
-   - preserve a short, reliable click gesture.
-   - a pinch press holds the left mouse button and release performs mouse-up,
-   - a short pinch produces one click and never repeats while held,
-   - two nearby short pinches within the double-click interval emit a double-click,
-   - release any held mouse button during application shutdown.
+   - keep ordinary cursor tracking active while a tool pose is recognized; pause it only during an eligible asset drag,
+   - allow pinch-drag only when the pinch starts on an asset thumbnail in the workspace,
+   - require deliberate, sustained palm-center displacement before starting that drag; do not use index-fingertip curl as drag movement,
+   - move relative to the locked cursor position, preserve the last drag offset during brief landmark dropouts, and cancel safely on longer tracking loss,
+   - send mouse-down from the original asset thumbnail, and release at the destination so the timeline's existing drop validation accepts only valid timeline tracks,
+   - emit one immediate click when thumb and index first touch outside an asset thumbnail; do not emit another click on release,
+   - when a pinch begins on an asset thumbnail, start the native asset drag and let the existing timeline drop validation decide whether to add the asset,
+   - recognize Select with the original OK sign (thumb and index touching, middle/ring/pinky extended) and activate it after two seconds,
+   - release any held mouse button during application shutdown or control disable.
 7. Respect existing Tkinter and threading behavior. Do not block the camera update loop or Tkinter main loop.
 8. Preserve existing public APIs unless a change is required and is followed by focused call-site updates.
 9. Do not introduce dependencies unless the project already provides a suitable library.
 
 ## Tool behavior
 
-- **Select:** select a clip or layer based on the active pointer position.
+- **Select:** hold the OK sign for two seconds to select the Select tool.
 - **Move:** drag the selected object using smooth pointer coordinates.
 - **Copy:** duplicate the selected object once per deliberate gesture or command.
 - **Resize:** resize only the selected object and constrain behavior according to existing timeline/display conventions.
 - **Cut:** split the selected clip at the playhead or perform the editor's existing split operation.
 - **Camera View:** keep this as a UI/view mode and do not execute a destructive action.
+- **Pinch click and drag:** pinch clicks immediately except when it begins on a workspace asset thumbnail; there it can drag the asset only to a valid timeline track.
 
 ## Verification
 
 - Add focused tests under `tests/` for pure gesture and controller behavior.
-- Cover no-hand input, ambiguous hands, hold activation, debouncing, coordinate scaling, smoothing, clamp behavior, and copy/cut repeated-action prevention.
+- Cover no-hand input, ambiguous hands, pinch hysteresis, tracking dropouts, hold activation, debouncing, asset-source hit testing, timeline-drop bounds, coordinate scaling, cursor jitter, fast-motion response, drag anchoring, clamp behavior, and copy/cut repeated-action prevention.
 - Run the smallest relevant test command first, then the available full suite.
 - Use a syntax check or compile command if no tests cover a changed module.
 - Report every untested camera or OS-specific behavior explicitly.
