@@ -24,8 +24,9 @@ class EditorController:
         return None
 
     # ========================================================
-    # DELETE
+    # TOOL SELECTION
     # ========================================================
+
     def select_tool(
         self,
         tool_name
@@ -44,6 +45,10 @@ class EditorController:
             return
 
         self.workspace.tools.activate_tool(
+            tool_name
+        )
+
+        self.workspace.timeline.set_tool(
             tool_name
         )
 
@@ -101,3 +106,7 @@ class EditorController:
         print(
             "EditorController: nothing selected"
         )
+
+    # ========================================================
+    # USING THE TOOLS
+    # ========================================================

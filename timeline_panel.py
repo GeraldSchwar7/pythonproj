@@ -28,6 +28,9 @@ class TimelinePanel(tk.Frame):
         self.selected_layer = self.layers[0]
         self.selected_clip = None
         self.selected_clip_layer = None
+
+        # Active editor tool.
+        self.current_tool = "Select"
         self.on_clip_added = on_clip_added
         self.on_time_changed = on_time_changed
         self.on_timeline_changed = on_timeline_changed
@@ -142,6 +145,9 @@ class TimelinePanel(tk.Frame):
         if self.selected_layer not in self.layers:
             self.selected_layer = self.layers[0] if self.layers else None
         self.redraw()
+
+    def set_tool(self, tool_name):
+        self.current_tool = tool_name
 
     def select_layer(self, layer):
         if layer not in self.layers or layer is self.selected_layer:
@@ -524,7 +530,7 @@ class TimelinePanel(tk.Frame):
         timeline_y = self.canvas.canvasy(event.y)
 
         layer, clip, edge = self._find_clip_resize_edge(timeline_x, timeline_y)
-        if clip is not None:
+        if clip is not None and self.current_tool == "Resize":
             self._select_clip(layer, clip)
             self.resizing_clip = clip
             self.resize_edge = edge
@@ -535,12 +541,22 @@ class TimelinePanel(tk.Frame):
 
         layer, clip = self._find_clip_at_position(timeline_x, timeline_y)
         if clip is not None:
+            # Every tool can select the clip it is acting on.
             self._select_clip(layer, clip)
-            self.dragged_clip = clip
-            self.dragged_clip_layer = layer
-            self.is_dragging_clip = True
-            mouse_time = timeline_x / self.pixels_per_second
-            self.drag_offset_time = mouse_time - clip.start_time
+
+            if self.current_tool == "Select":
+                return
+
+            if self.current_tool == "Move":
+                self.dragged_clip = clip
+                self.dragged_clip_layer = layer
+                self.is_dragging_clip = True
+                mouse_time = timeline_x / self.pixels_per_second
+                self.drag_offset_time = mouse_time - clip.start_time
+                return
+
+            # Resize is handled by the edge check above.
+            # Copy and Cut will be routed through EditorController next.
             return
 
         if self.selected_clip is not None:

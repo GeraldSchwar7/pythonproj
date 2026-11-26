@@ -1,6 +1,6 @@
 - Stabilize Mouse Acceleration
 - Dragging
-- Tools
+- Tools + Functionality
 - Particle System
 - Hue and Saturation (halfway implemented)
 - Masking
