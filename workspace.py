@@ -164,7 +164,8 @@ class Workspace(tk.Frame):
         # ==================================================
 
         self.tools = ToolPanel(
-            self
+            self,
+            on_tool_selected=self.timeline.set_tool
         )
 
         self.tools.grid(

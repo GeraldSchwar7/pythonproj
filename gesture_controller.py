@@ -13,8 +13,10 @@ class GestureController:
     def __init__(self):
 
         self.tool_hold_duration = 0.7
+        self.tool_release_debounce = 0.15
         self.pending_tool = None
         self.tool_start_time = None
+        self.release_start_time = None
         self.active_tool = None
 
     # ========================================================
@@ -368,13 +370,28 @@ class GestureController:
 
         if detected_tool is None:
 
-            self.pending_tool = None
-            self.tool_start_time = None
+            if self.pending_tool is None:
+                return {
+                    "active": False,
+                    "tool": None,
+                    "progress": 0.0,
+                    "triggered": False
+                }
+
+            now = time.monotonic()
+            if self.release_start_time is None:
+                self.release_start_time = now
+
+            if now - self.release_start_time >= self.tool_release_debounce:
+                self.pending_tool = None
+                self.tool_start_time = None
+                self.release_start_time = None
+                self.active_tool = None
 
             return {
-                "active": False,
-                "tool": None,
-                "progress": 0.0,
+                "active": self.pending_tool is not None,
+                "tool": self.pending_tool,
+                "progress": self._tool_progress(now),
                 "triggered": False
             }
 
@@ -384,6 +401,7 @@ class GestureController:
             self.tool_start_time = (
                 time.monotonic()
             )
+            self.release_start_time = None
 
             return {
                 "active": True,
@@ -392,15 +410,9 @@ class GestureController:
                 "triggered": False
             }
 
-        elapsed = (
-            time.monotonic()
-            - self.tool_start_time
-        )
-
-        progress = min(
-            elapsed / self.tool_hold_duration,
-            1.0
-        )
+        self.release_start_time = None
+        now = time.monotonic()
+        progress = self._tool_progress(now)
 
         triggered = False
 
@@ -417,3 +429,13 @@ class GestureController:
             "progress": progress,
             "triggered": triggered
         }
+
+    def _tool_progress(self, now):
+        if self.tool_start_time is None:
+            return 0.0
+
+        return min(
+            max(0.0, now - self.tool_start_time)
+            / self.tool_hold_duration,
+            1.0
+        )

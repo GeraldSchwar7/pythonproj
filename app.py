@@ -51,7 +51,7 @@ class CameraViewerApp:
 
         self.gesture_controller = GestureController()
 
-        self.hand_mouse = HandMouseController(smoothing=0.75)
+        self.hand_mouse = HandMouseController(smoothing=0.45)
 
         self.camera_list = (
             self.camera_manager.find_available_cameras()
@@ -382,12 +382,6 @@ class CameraViewerApp:
             # PINCH
             # ========================================
 
-            pinch_clicked = (
-                self.hand_tracker.detect_pinch(
-                    frame
-                )
-            )
-
             # ========================================
             # POINTER
             # ========================================
@@ -414,7 +408,20 @@ class CameraViewerApp:
                     height
                 )
 
-                if pinch_clicked:
+            pinch_state = (
+                self.hand_tracker.update_pinch(
+                    frame
+                )
+            )
+
+            if pinch_state["dragging"]:
+                self.hand_mouse.mouse_down()
+
+            if pinch_state["released"]:
+                if self.hand_mouse.is_mouse_down:
+                    self.hand_mouse.mouse_up()
+                    print("DRAG RELEASE")
+                else:
                     self.hand_mouse.click()
                     print("CLICK")
 
@@ -524,6 +531,11 @@ class CameraViewerApp:
                 print("Shutdown: could not close scene separation:", error)
 
         self.camera_manager.release()
+
+        try:
+            self.hand_mouse.mouse_up()
+        except Exception as error:
+            print("Shutdown: could not release mouse button:", error)
 
         try:
             self.hand_tracker.close()

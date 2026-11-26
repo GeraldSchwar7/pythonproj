@@ -27,7 +27,8 @@ class MediaClip:
         self,
         file_path,
         start_time=0.0,
-        duration=None
+        duration=None,
+        source_start_time=0.0
     ):
 
         self.file_path = file_path
@@ -61,6 +62,10 @@ class MediaClip:
         self.duration = max(
             0.05,
             float(duration)
+        )
+        self.source_start_time = max(
+            0.0,
+            float(source_start_time)
         )
 
     # ======================================================
@@ -165,6 +170,7 @@ class MediaClip:
 
         return max(
             0.0,
-            project_time
+            self.source_start_time
+            + project_time
             - self.start_time
         )

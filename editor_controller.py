@@ -60,6 +60,22 @@ class EditorController:
 
         return self.workspace.timeline.selected_layer
 
+    def copy_selected(self):
+        timeline = self.workspace.timeline
+        clip = self.get_selected_clip()
+        if clip is None or not hasattr(timeline, "duplicate_clip"):
+            return None
+
+        return timeline.duplicate_clip(clip)
+
+    def cut_selected(self):
+        timeline = self.workspace.timeline
+        clip = self.get_selected_clip()
+        if clip is None or not hasattr(timeline, "split_clip_at_playhead"):
+            return False
+
+        return timeline.split_clip_at_playhead(clip)
+
     # ========================================================
     # DELETE
     # ========================================================

@@ -6,9 +6,10 @@ from settings import (
 
 
 class ToolPanel(tk.Frame):
-    def __init__(self, parent):
+    def __init__(self, parent, on_tool_selected=None):
         super().__init__(parent, bg=PANEL, highlightbackground=BORDER, highlightthickness=1)
         self.current_tool = "Select"
+        self.on_tool_selected = on_tool_selected
         self.buttons = {}
 
         header = tk.Frame(self, bg=PANEL)
@@ -60,6 +61,8 @@ class ToolPanel(tk.Frame):
     def select_tool(self, tool):
         self.current_tool = tool
         self._refresh_selection()
+        if self.on_tool_selected is not None:
+            self.on_tool_selected(tool)
         print("Selected tool:", tool)
 
 

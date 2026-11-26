@@ -1,3 +1,4 @@
+import copy
 import time
 import tkinter as tk
 from settings import (PANEL, PANEL_LIGHT, PANEL_HOVER, PANEL_DEEP, BORDER, TEXT, TEXT_DIM,
@@ -55,6 +56,8 @@ class TimelinePanel(tk.Frame):
         self.resizing_clip = None
         self.resize_edge = None
         self.resize_fixed_time = 0.0
+        self.resize_original_start = 0.0
+        self.resize_original_source_start = 0.0
         self.is_dragging_layer = False
         self.dragged_layer = None
         self.layer_order_changed = False
@@ -285,7 +288,12 @@ class TimelinePanel(tk.Frame):
                     layer.scale,
                     layer.opacity,
                     tuple(
-                        (clip, clip.start_time, clip.duration)
+                        (
+                            clip,
+                            clip.start_time,
+                            clip.duration,
+                            clip.source_start_time
+                        )
                         for clip in layer.clips
                     )
                 )
@@ -313,9 +321,10 @@ class TimelinePanel(tk.Frame):
             layer.scale = scale
             layer.opacity = opacity
             layer.clips = []
-            for clip, start_time, duration in clip_states:
+            for clip, start_time, duration, source_start_time in clip_states:
                 clip.start_time = start_time
                 clip.duration = duration
+                clip.source_start_time = source_start_time
                 layer.clips.append(clip)
             self.layers.append(layer)
 
@@ -460,6 +469,74 @@ class TimelinePanel(tk.Frame):
         self.redraw()
         self._notify_timeline_changed()
 
+    def duplicate_clip(self, clip, start_time=None):
+        if clip is None:
+            return None
+
+        layer = next(
+            (layer for layer in self.layers if clip in layer.clips),
+            None
+        )
+        if layer is None:
+            return None
+
+        duplicate = copy.copy(clip)
+        duplicate.start_time = max(
+            0.0,
+            clip.end_time if start_time is None else float(start_time)
+        )
+        layer.add_clip(duplicate)
+        self.select_layer(layer)
+        self.selected_clip = duplicate
+        self.selected_clip_layer = layer
+        self.timeline_duration = max(
+            self.timeline_duration,
+            duplicate.end_time + 5.0
+        )
+        self.redraw()
+        self._notify_timeline_changed()
+        return duplicate
+
+    def split_clip_at_playhead(self, clip=None):
+        clip = clip or self.selected_clip
+        if clip is None:
+            return False
+
+        layer = next(
+            (layer for layer in self.layers if clip in layer.clips),
+            None
+        )
+        if layer is None:
+            return False
+
+        split_time = float(self.current_time)
+        left_duration = split_time - clip.start_time
+        right_duration = clip.end_time - split_time
+        if left_duration < 0.05 or right_duration < 0.05:
+            return False
+
+        original_end = clip.end_time
+        source_start_time = getattr(clip, "source_start_time", 0.0)
+        right_clip = copy.copy(clip)
+        right_clip.start_time = split_time
+        right_clip.duration = right_duration
+        right_clip.source_start_time = (
+            source_start_time + left_duration
+        )
+        clip.duration = left_duration
+
+        layer.clips.insert(layer.clips.index(clip) + 1, right_clip)
+        self.select_layer(layer)
+        self.selected_clip = right_clip
+        self.selected_clip_layer = layer
+        self.timeline_duration = max(
+            self.timeline_duration,
+            original_end
+        )
+        self.redraw()
+        self._notify_timeline_changed()
+        return right_clip
+
     def _select_clip(self, layer, clip):
         self.select_layer(layer)
         self.selected_clip = clip
@@ -495,7 +572,7 @@ class TimelinePanel(tk.Frame):
 
     def _find_clip_resize_edge(self, timeline_x, timeline_y):
         layer, clip = self._find_clip_at_position(timeline_x, timeline_y)
-        if clip is None or clip.media_type != "image":
+        if clip is None:
             return None, None, None
 
         left_x = clip.start_time * self.pixels_per_second
@@ -534,6 +611,12 @@ class TimelinePanel(tk.Frame):
             self._select_clip(layer, clip)
             self.resizing_clip = clip
             self.resize_edge = edge
+            self.resize_original_start = clip.start_time
+            self.resize_original_source_start = getattr(
+                clip,
+                "source_start_time",
+                0.0
+            )
             self.resize_fixed_time = (
                 clip.end_time if edge == "left" else clip.start_time
             )
@@ -555,8 +638,14 @@ class TimelinePanel(tk.Frame):
                 self.drag_offset_time = mouse_time - clip.start_time
                 return
 
-            # Resize is handled by the edge check above.
-            # Copy and Cut will be routed through EditorController next.
+            if self.current_tool == "Copy":
+                self.duplicate_clip(clip)
+                return
+
+            if self.current_tool == "Cut":
+                self.split_clip_at_playhead(clip)
+                return
+
             return
 
         if self.selected_clip is not None:
@@ -640,13 +729,26 @@ class TimelinePanel(tk.Frame):
         if self.resizing_clip is not None:
             resized_time = max(0.0, timeline_x / self.pixels_per_second)
             if self.resize_edge == "left":
-                new_start = min(
-                    resized_time,
-                    self.resize_fixed_time - 0.05
+                earliest_source_time = 0.0
+                if self.resizing_clip.media_type == "video":
+                    earliest_source_time = max(
+                        0.0,
+                        self.resize_original_start
+                        - self.resize_original_source_start
+                    )
+                new_start = max(
+                    earliest_source_time,
+                    min(resized_time, self.resize_fixed_time - 0.05)
                 )
                 self.resizing_clip.start_time = max(0.0, new_start)
                 self.resizing_clip.duration = (
                     self.resize_fixed_time - self.resizing_clip.start_time
+                )
+                self.resizing_clip.source_start_time = max(
+                    0.0,
+                    self.resize_original_source_start
+                    + self.resizing_clip.start_time
+                    - self.resize_original_start
                 )
             else:
                 self.resizing_clip.duration = max(
