@@ -478,6 +478,12 @@ class GestureController:
             "triggered": triggered
         }
 
+    def reset_tool_gesture(self):
+        self.pending_tool = None
+        self.tool_start_time = None
+        self.release_start_time = None
+        self.active_tool = None
+
     def _tool_progress(self, now):
         if self.tool_start_time is None:
             return 0.0

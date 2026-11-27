@@ -38,6 +38,7 @@ class EditorController:
             "Copy",
             "Resize",
             "Cut",
+            "Paste",
             "Camera View"
         }
 
@@ -63,18 +64,27 @@ class EditorController:
     def copy_selected(self):
         timeline = self.workspace.timeline
         clip = self.get_selected_clip()
-        if clip is None or not hasattr(timeline, "duplicate_clip"):
+        if clip is None or not hasattr(timeline, "copy_clip_to_clipboard"):
             return None
 
-        return timeline.duplicate_clip(clip)
+        return timeline.copy_clip_to_clipboard(clip)
 
-    def cut_selected(self):
+    def paste_at_position(self, timeline_x, timeline_y):
+        return self.workspace.timeline.paste_clip_at_position(
+            timeline_x,
+            timeline_y
+        )
+
+    def cut_selected(self, split_time=None):
         timeline = self.workspace.timeline
         clip = self.get_selected_clip()
-        if clip is None or not hasattr(timeline, "split_clip_at_playhead"):
+        if clip is None:
             return False
 
-        return timeline.split_clip_at_playhead(clip)
+        if split_time is None:
+            return timeline.split_clip_at_playhead(clip)
+
+        return timeline.split_clip_at_time(clip, split_time)
 
     # ========================================================
     # DELETE

@@ -20,9 +20,10 @@ class ToolPanel(tk.Frame):
         tools = [
             ("Select", "↖", "🤙", "Choose clips and layers (ASL Y)"),
             ("Move", "✥", "✊", "Move selected media"),
-            ("Copy", "▣", "C", "Duplicate selection"),
+            ("Copy", "▣", "C", "Copy selected clip"),
+            ("Paste", "▤", "👌", "Paste copied clip at the timeline cursor"),
             ("Resize", "↔", "🤞", "Scale selected media"),
-            ("Cut", "✂", "✌", "Split at playhead"),
+            ("Cut", "✂", "✌", "Split the clip at the clicked timeline time"),
             ("Camera View", "◉", "", "Show camera monitor"),
         ]
 

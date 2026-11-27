@@ -22,6 +22,12 @@ class CameraViewerApp:
         self._closing = False
         self._update_frame_job = None
         self.pinch_asset_drag_allowed = False
+        self.hand_control_paused = False
+        self.latest_hand_position = None
+        self.last_frame_size = None
+        self.hand_settings_window = None
+        self._notification_label = None
+        self._notification_job = None
 
         self.root.title(
             "Project Monday"
@@ -72,7 +78,10 @@ class CameraViewerApp:
         self.create_menu()
 
         self.workspace = Workspace(
-            self.root
+            self.root,
+            on_status=self.set_status,
+            on_hand_control_toggle=self.toggle_hand_control,
+            on_calibrate=self.open_hand_control_settings
         )
 
         self.editor = EditorController(
@@ -95,8 +104,20 @@ class CameraViewerApp:
             self._redo_from_keyboard
         )
         self.root.bind_all(
+            "<Control-c>",
+            self._copy_selected_from_keyboard
+        )
+        self.root.bind_all(
+            "<Control-v>",
+            self._paste_from_keyboard
+        )
+        self.root.bind_all(
             "<Control-Shift-Z>",
             self._redo_from_keyboard
+        )
+        self.root.bind_all(
+            "<F8>",
+            self._toggle_hand_control_from_keyboard
         )
         self.root.bind_all(
             "<KeyRelease-space>",
@@ -147,6 +168,233 @@ class CameraViewerApp:
 
         self.workspace.timeline.redo()
         return "break"
+
+    def _copy_selected_from_keyboard(self, event):
+        if self._is_text_entry_focused():
+            return None
+
+        if self.editor.copy_selected() is None:
+            self.set_status("Select a clip to copy")
+        return "break"
+
+    def _paste_from_keyboard(self, event):
+        if self._is_text_entry_focused():
+            return None
+
+        timeline = self.workspace.timeline
+        position = timeline.last_mouse_timeline_position
+        if position is None:
+            layer = timeline.selected_layer
+            if layer not in timeline.layers:
+                self.set_status("Select a timeline layer to paste into")
+                return "break"
+            layer_index = timeline.layers.index(layer)
+            position = (
+                timeline.current_time * timeline.pixels_per_second,
+                timeline.RULER_HEIGHT
+                + layer_index * timeline.TRACK_HEIGHT
+                + timeline.CLIP_TOP_PADDING
+                + 1
+            )
+
+        self.editor.paste_at_position(*position)
+        return "break"
+
+    def _toggle_hand_control_from_keyboard(self, event):
+        self.toggle_hand_control()
+        return "break"
+
+    def toggle_hand_control(self):
+        self.set_hand_control_paused(not self.hand_control_paused)
+
+    def set_hand_control_paused(self, paused):
+        paused = bool(paused)
+        if paused == self.hand_control_paused:
+            return
+
+        self.hand_control_paused = paused
+        if paused:
+            self.hand_mouse.disable()
+            self.hand_tracker.cancel_pinch()
+            self.gesture_controller.reset_tool_gesture()
+            self.pinch_asset_drag_allowed = False
+        else:
+            self.hand_mouse.enable()
+
+        self.workspace.timeline.set_hand_control_paused(paused)
+        self.set_status(
+            "Hand control paused" if paused else "Hand control resumed"
+        )
+
+    def open_hand_control_settings(self):
+        if (
+            self.hand_settings_window is not None
+            and self.hand_settings_window.winfo_exists()
+        ):
+            self.hand_settings_window.lift()
+            return
+
+        previously_paused = self.hand_control_paused
+        self.set_hand_control_paused(True)
+        window = tk.Toplevel(self.root)
+        self.hand_settings_window = window
+        window.title("Hand Control Calibration")
+        window.geometry("460x440")
+        window.transient(self.root)
+        window.configure(bg=PANEL)
+
+        title = tk.Label(
+            window,
+            text="Hand Control Settings",
+            bg=PANEL,
+            fg=TEXT,
+            font=(FONT, 13, "bold")
+        )
+        title.pack(anchor="w", padx=18, pady=(16, 8))
+
+        settings_frame = tk.Frame(window, bg=PANEL)
+        settings_frame.pack(fill="both", expand=True)
+        self._hand_settings_vars = []
+
+        def add_scale(row, label, lower, upper, value, formatter, callback):
+            tk.Label(
+                settings_frame,
+                text=label,
+                bg=PANEL,
+                fg=TEXT_DIM,
+                font=(FONT, 9)
+            ).grid(row=row, column=0, sticky="w", padx=(18, 8), pady=6)
+            value_label = tk.Label(
+                settings_frame,
+                text=formatter(value),
+                bg=PANEL,
+                fg=TEXT,
+                font=(FONT, 9)
+            )
+            value_label.grid(row=row, column=2, sticky="e", padx=(8, 18))
+            variable = tk.DoubleVar(master=window, value=value)
+            self._hand_settings_vars.append(variable)
+
+            def update(raw_value):
+                number = float(raw_value)
+                value_label.configure(text=formatter(number))
+                callback(number)
+
+            ttk.Scale(
+                settings_frame,
+                from_=lower,
+                to=upper,
+                variable=variable,
+                command=update
+            ).grid(row=row, column=1, sticky="ew", padx=8)
+
+        settings_frame.grid_columnconfigure(1, weight=1)
+        add_scale(
+            1, "Cursor sensitivity", 0.5, 2.0,
+            self.hand_mouse.sensitivity, lambda value: f"{value:.2f}x",
+            self.hand_mouse.set_sensitivity
+        )
+        add_scale(
+            2, "Cursor smoothing", 0.0, 1.0,
+            self.hand_mouse.smoothing, lambda value: f"{value:.2f}",
+            self.hand_mouse.set_smoothing
+        )
+        add_scale(
+            3, "Pinch sensitivity", 0.6, 1.4,
+            self.hand_tracker.pinch_sensitivity, lambda value: f"{value:.2f}x",
+            self.hand_tracker.set_pinch_sensitivity
+        )
+        add_scale(
+            4, "Drag movement threshold", 6.0, 40.0,
+            self.hand_tracker.drag_movement_threshold,
+            lambda value: f"{value:.0f} px",
+            self.hand_tracker.set_drag_movement_threshold
+        )
+
+        calibration_label = tk.Label(
+            settings_frame,
+            text=(
+                "Move your hand to the comfortable upper-left edge "
+                "of your camera area."
+            ),
+            bg=PANEL,
+            fg=TEXT_DIM,
+            justify="left",
+            wraplength=420,
+            font=(FONT, 9)
+        )
+        calibration_label.grid(
+            row=5,
+            column=0,
+            columnspan=3,
+            sticky="w",
+            padx=18,
+            pady=(16, 8)
+        )
+        capture_state = {"points": [], "finished": False}
+        capture_button = tk.Button(settings_frame, text="Capture upper-left")
+        capture_button.grid(
+            row=6,
+            column=0,
+            columnspan=3,
+            sticky="ew",
+            padx=18,
+            pady=4
+        )
+
+        def close_settings():
+            if not capture_state["finished"]:
+                capture_state["finished"] = True
+                self.hand_settings_window = None
+                self.set_hand_control_paused(previously_paused)
+                window.destroy()
+
+        def capture_position():
+            position = self.latest_hand_position
+            frame_size = self.last_frame_size
+            if position is None or frame_size is None:
+                calibration_label.configure(
+                    text="No hand detected. Show your hand to the camera and try again."
+                )
+                return
+
+            capture_state["points"].append(position)
+            if len(capture_state["points"]) == 1:
+                calibration_label.configure(
+                    text=(
+                        "Now move to the comfortable lower-right edge "
+                        "and capture again."
+                    )
+                )
+                capture_button.configure(text="Capture lower-right")
+                return
+
+            first, second = capture_state["points"]
+            if not self.hand_mouse.set_calibration_bounds(
+                first,
+                second,
+                frame_size[0],
+                frame_size[1]
+            ):
+                capture_state["points"].pop()
+                calibration_label.configure(
+                    text=(
+                        "The points were too close together. Move farther "
+                        "apart and capture the lower-right point again."
+                    )
+                )
+                return
+
+            capture_state["finished"] = True
+            self.hand_settings_window = None
+            self.set_hand_control_paused(previously_paused)
+            self.set_status("Cursor area calibrated")
+            window.destroy()
+
+        capture_button.configure(command=capture_position)
+        window.protocol("WM_DELETE_WINDOW", close_settings)
+        window.bind("<Escape>", lambda event: close_settings())
+        window.grab_set()
 
     def _toggle_playback_from_keyboard(self, event):
         focused_widget = self.root.focus_get()
@@ -255,7 +503,11 @@ class CameraViewerApp:
         )
 
         tk.Label(
-            status_frame, text="PINCH = CLICK  •  ASSET → TIMELINE = DRAG",
+            status_frame,
+            text=(
+                "GESTURE MODE  •  HOLD 2s TO SELECT  •  "
+                "PINCH = CLICK  •  ASSET → TIMELINE = DRAG"
+            ),
             bg=PANEL, fg=TEXT_DIM, font=(FONT, 8, "bold")
         ).pack(side="right", padx=14, pady=5)
 
@@ -297,6 +549,7 @@ class CameraViewerApp:
         self._update_frame_job = None
         if self._closing:
             return
+        self.latest_hand_position = None
 
         # READ CAMERA
         # ========================================
@@ -319,6 +572,7 @@ class CameraViewerApp:
         # Mirror the camera
         try:
             frame = cv2.flip(frame, 1)
+            self.last_frame_size = (frame.shape[1], frame.shape[0])
         except Exception as error:
             print("Camera frame error:", error)
             if not self._closing:
@@ -357,6 +611,7 @@ class CameraViewerApp:
             # frame = self.hand_tracker.draw(frame)
 
             index_finger = self.hand_tracker.get_index_finger(frame)
+            self.latest_hand_position = index_finger
             thumb = self.hand_tracker.get_thumb(frame)
 
             if index_finger is not None:
@@ -416,6 +671,12 @@ class CameraViewerApp:
         )
 
     def _process_hand_controls(self, frame, landmarks):
+        if self.hand_control_paused:
+            if self.hand_mouse.is_mouse_down:
+                self.hand_mouse.mouse_up()
+            self.pinch_asset_drag_allowed = False
+            return
+
         detected_tool = self.gesture_controller.detect_tool_gesture(
             landmarks
         )
@@ -507,6 +768,53 @@ class CameraViewerApp:
         self.status_label.configure(
             text=f"Status: {message}"
         )
+        if (
+            message.startswith("Gesture selected ")
+            or message.endswith(" has been copied")
+        ):
+            self.show_notification(message)
+
+    def show_notification(self, message):
+        if self._closing:
+            return
+
+        if self._notification_job is not None:
+            try:
+                self.root.after_cancel(self._notification_job)
+            except tk.TclError:
+                pass
+            self._notification_job = None
+
+        if self._notification_label is not None:
+            self._notification_label.destroy()
+
+        self._notification_label = tk.Label(
+            self.root,
+            text=message,
+            bg=PANEL_LIGHT,
+            fg=TEXT,
+            font=(FONT, 10, "bold"),
+            padx=16,
+            pady=9,
+            relief="solid",
+            bd=1
+        )
+        self._notification_label.place(
+            relx=0.5,
+            rely=1.0,
+            y=-42,
+            anchor="s"
+        )
+        self._notification_job = self.root.after(
+            2400,
+            self._dismiss_notification
+        )
+
+    def _dismiss_notification(self):
+        self._notification_job = None
+        if self._notification_label is not None:
+            self._notification_label.destroy()
+            self._notification_label = None
 
     # ========================================================
     # CLEANUP
@@ -517,6 +825,13 @@ class CameraViewerApp:
             return
 
         self._closing = True
+
+        if self._notification_job is not None:
+            try:
+                self.root.after_cancel(self._notification_job)
+            except tk.TclError:
+                pass
+            self._notification_job = None
 
         if self._update_frame_job is not None:
             try:

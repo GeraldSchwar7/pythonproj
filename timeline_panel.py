@@ -18,7 +18,9 @@ class TimelinePanel(tk.Frame):
     LAYER_NAME_WIDTH = 150
 
     def __init__(self, parent, on_clip_added=None, on_time_changed=None,
-                 on_timeline_changed=None, on_layer_selected=None):
+                 on_timeline_changed=None, on_layer_selected=None,
+                 on_status=None, on_hand_control_toggle=None,
+                 on_calibrate=None):
         super().__init__(parent, bg=PANEL, highlightbackground=BORDER, highlightthickness=1)
 
         self.layers = [
@@ -36,6 +38,11 @@ class TimelinePanel(tk.Frame):
         self.on_time_changed = on_time_changed
         self.on_timeline_changed = on_timeline_changed
         self.on_layer_selected = on_layer_selected
+        self.on_status = on_status
+        self.on_hand_control_toggle = on_hand_control_toggle
+        self.on_calibrate = on_calibrate
+        self.clipboard_clip = None
+        self.last_mouse_timeline_position = None
 
         self._undo_stack = []
         self._redo_stack = []
@@ -83,6 +90,13 @@ class TimelinePanel(tk.Frame):
             self.undo
         )
         self.undo_button.pack(side="left", padx=(4, 2))
+        self.play_button = flat_button(
+            header,
+            "Play",
+            self.toggle_playback
+        )
+        self.play_button.pack(side="left", padx=4)
+
         self.redo_button = flat_button(
             header,
             "Redo",
@@ -90,12 +104,17 @@ class TimelinePanel(tk.Frame):
         )
         self.redo_button.pack(side="left", padx=2)
 
-        self.play_button = flat_button(
+        self.hand_control_button = flat_button(
             header,
-            "Play",
-            self.toggle_playback
+            "Pause Hand",
+            self._toggle_hand_control
         )
-        self.play_button.pack(side="left", padx=4)
+        self.hand_control_button.pack(side="left", padx=2)
+        flat_button(
+            header,
+            "Calibrate",
+            self._open_hand_control_settings
+        ).pack(side="left", padx=2)
 
         flat_button(header, "+", self.zoom_in, width=2).pack(side="right", padx=(2, 10), pady=5)
         flat_button(header, "−", self.zoom_out, width=2).pack(side="right", padx=2, pady=5)
@@ -151,6 +170,19 @@ class TimelinePanel(tk.Frame):
 
     def set_tool(self, tool_name):
         self.current_tool = tool_name
+
+    def set_hand_control_paused(self, paused):
+        self.hand_control_button.configure(
+            text="Resume Hand" if paused else "Pause Hand"
+        )
+
+    def _toggle_hand_control(self):
+        if self.on_hand_control_toggle is not None:
+            self.on_hand_control_toggle()
+
+    def _open_hand_control_settings(self):
+        if self.on_calibrate is not None:
+            self.on_calibrate()
 
     def select_layer(self, layer):
         if layer not in self.layers or layer is self.selected_layer:
@@ -498,6 +530,9 @@ class TimelinePanel(tk.Frame):
         return duplicate
 
     def split_clip_at_playhead(self, clip=None):
+        return self.split_clip_at_time(clip, self.current_time)
+
+    def split_clip_at_time(self, clip, split_time):
         clip = clip or self.selected_clip
         if clip is None:
             return False
@@ -509,7 +544,7 @@ class TimelinePanel(tk.Frame):
         if layer is None:
             return False
 
-        split_time = float(self.current_time)
+        split_time = float(split_time)
         left_duration = split_time - clip.start_time
         right_duration = clip.end_time - split_time
         if left_duration < 0.05 or right_duration < 0.05:
@@ -536,6 +571,51 @@ class TimelinePanel(tk.Frame):
         self.redraw()
         self._notify_timeline_changed()
         return right_clip
+
+    def copy_clip_to_clipboard(self, clip):
+        if clip is None or not any(
+            clip in layer.clips for layer in self.layers
+        ):
+            return None
+
+        self.clipboard_clip = copy.copy(clip)
+        if self.on_status is not None:
+            self.on_status(f"{clip.name} has been copied")
+        return self.clipboard_clip
+
+    def paste_clip_at_position(self, timeline_x, timeline_y):
+        if self.clipboard_clip is None:
+            if self.on_status is not None:
+                self.on_status("Nothing has been copied yet")
+            return None
+
+        layer_index = self._layer_index_at_y(timeline_y)
+        if layer_index is None:
+            if self.on_status is not None:
+                self.on_status("Click inside a timeline track to paste")
+            return None
+
+        pasted_clip = copy.copy(self.clipboard_clip)
+        pasted_clip.start_time = max(
+            0.0,
+            float(timeline_x) / self.pixels_per_second
+        )
+        layer = self.layers[layer_index]
+        layer.add_clip(pasted_clip)
+        self.select_layer(layer)
+        self.selected_clip = pasted_clip
+        self.selected_clip_layer = layer
+        self.timeline_duration = max(
+            self.timeline_duration,
+            pasted_clip.end_time + 5.0
+        )
+        self.redraw()
+        self._notify_timeline_changed()
+        if self.on_clip_added is not None:
+            self.on_clip_added(layer, pasted_clip)
+        if self.on_status is not None:
+            self.on_status(f"{pasted_clip.name} pasted")
+        return pasted_clip
 
     def _select_clip(self, layer, clip):
         self.select_layer(layer)
@@ -605,6 +685,11 @@ class TimelinePanel(tk.Frame):
     def _mouse_pressed(self, event):
         timeline_x = self.canvas.canvasx(event.x)
         timeline_y = self.canvas.canvasy(event.y)
+        self.last_mouse_timeline_position = (timeline_x, timeline_y)
+
+        if self.current_tool == "Paste":
+            self.paste_clip_at_position(timeline_x, timeline_y)
+            return
 
         layer, clip, edge = self._find_clip_resize_edge(timeline_x, timeline_y)
         if clip is not None and self.current_tool == "Resize":
@@ -639,11 +724,14 @@ class TimelinePanel(tk.Frame):
                 return
 
             if self.current_tool == "Copy":
-                self.duplicate_clip(clip)
+                self.copy_clip_to_clipboard(clip)
                 return
 
             if self.current_tool == "Cut":
-                self.split_clip_at_playhead(clip)
+                self.split_clip_at_time(
+                    clip,
+                    timeline_x / self.pixels_per_second
+                )
                 return
 
             return
@@ -844,6 +932,7 @@ class TimelinePanel(tk.Frame):
     def _mouse_moved(self, event):
         timeline_x = self.canvas.canvasx(event.x)
         timeline_y = self.canvas.canvasy(event.y)
+        self.last_mouse_timeline_position = (timeline_x, timeline_y)
         _, _, edge = self._find_clip_resize_edge(timeline_x, timeline_y)
         if edge is not None:
             self.canvas.configure(cursor="sb_h_double_arrow")

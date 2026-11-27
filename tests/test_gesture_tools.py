@@ -150,6 +150,7 @@ class AppGestureRoutingTests(unittest.TestCase):
         app.workspace = Mock()
         app.workspace.assets.contains_asset_at_screen.return_value = False
         app.pinch_asset_drag_allowed = False
+        app.hand_control_paused = False
         app.gesture_controller = GestureController()
         app.gesture_controller.detect_tool_gesture = Mock(
             return_value=None
@@ -385,6 +386,112 @@ class AppGestureRoutingTests(unittest.TestCase):
         app._process_hand_controls(frame, {})
 
         app.hand_mouse.move.assert_called_once_with(400, 200, 640, 480)
+
+    def test_paused_hand_control_skips_gesture_and_pinch_processing(self):
+        app, frame = self.make_app(())
+        app.hand_control_paused = True
+        app.hand_mouse.is_mouse_down = True
+
+        app._process_hand_controls(frame, {})
+
+        app.gesture_controller.detect_tool_gesture.assert_not_called()
+        app.hand_tracker.update_pinch.assert_not_called()
+        app.hand_mouse.mouse_up.assert_called_once()
+        self.assertFalse(app.pinch_asset_drag_allowed)
+
+    def test_pause_and_resume_reset_hand_control_state(self):
+        app, _ = self.make_app(())
+        app.workspace.timeline.set_hand_control_paused = Mock()
+        app.gesture_controller.pending_tool = "Copy"
+        app.gesture_controller.tool_start_time = 1.0
+        app.gesture_controller.active_tool = "Copy"
+
+        app.set_hand_control_paused(True)
+
+        app.hand_mouse.disable.assert_called_once()
+        app.hand_tracker.cancel_pinch.assert_called_once()
+        app.workspace.timeline.set_hand_control_paused.assert_called_once_with(
+            True
+        )
+        self.assertIsNone(app.gesture_controller.pending_tool)
+        self.assertIsNone(app.gesture_controller.tool_start_time)
+        self.assertIsNone(app.gesture_controller.active_tool)
+
+        app.set_hand_control_paused(False)
+
+        app.hand_mouse.enable.assert_called_once()
+        self.assertEqual(
+            app.workspace.timeline.set_hand_control_paused.call_args_list,
+            [unittest.mock.call(True), unittest.mock.call(False)]
+        )
+
+
+class StatusNotificationTests(unittest.TestCase):
+    def test_gesture_selection_and_copy_statuses_show_notifications(self):
+        app = CameraViewerApp.__new__(CameraViewerApp)
+        app.status_label = Mock()
+        app.show_notification = Mock()
+
+        app.set_status("Gesture selected Copy tool")
+        app.set_status("clip.mp4 has been copied")
+        app.set_status("Hand control resumed")
+
+        self.assertEqual(
+            app.status_label.configure.call_args_list,
+            [
+                unittest.mock.call(text="Status: Gesture selected Copy tool"),
+                unittest.mock.call(text="Status: clip.mp4 has been copied"),
+                unittest.mock.call(text="Status: Hand control resumed")
+            ]
+        )
+        self.assertEqual(
+            app.show_notification.call_args_list,
+            [
+                unittest.mock.call("Gesture selected Copy tool"),
+                unittest.mock.call("clip.mp4 has been copied")
+            ]
+        )
+
+
+class KeyboardClipboardTests(unittest.TestCase):
+    def make_app(self):
+        app = CameraViewerApp.__new__(CameraViewerApp)
+        app.editor = Mock()
+        app.set_status = Mock()
+        app._is_text_entry_focused = Mock(return_value=False)
+        return app
+
+    def test_ctrl_c_copies_selection_without_duplicating(self):
+        app = self.make_app()
+        app.editor.copy_selected.return_value = object()
+
+        result = app._copy_selected_from_keyboard(None)
+
+        self.assertEqual(result, "break")
+        app.editor.copy_selected.assert_called_once_with()
+        app.set_status.assert_not_called()
+
+    def test_ctrl_c_without_selection_prompts_user(self):
+        app = self.make_app()
+        app.editor.copy_selected.return_value = None
+
+        result = app._copy_selected_from_keyboard(None)
+
+        self.assertEqual(result, "break")
+        app.set_status.assert_called_once_with("Select a clip to copy")
+
+    def test_ctrl_v_pastes_at_last_timeline_mouse_position(self):
+        app = self.make_app()
+        app.workspace = SimpleNamespace(
+            timeline=SimpleNamespace(
+                last_mouse_timeline_position=(210.0, 60.0)
+            )
+        )
+
+        result = app._paste_from_keyboard(None)
+
+        self.assertEqual(result, "break")
+        app.editor.paste_at_position.assert_called_once_with(210.0, 60.0)
 
 
 class PinchTests(unittest.TestCase):
@@ -665,7 +772,12 @@ class TimelineToolTests(unittest.TestCase):
         timeline.selected_clip_layer = layer
         timeline.current_time = current_time
         timeline.timeline_duration = 60.0
+        timeline.pixels_per_second = 70.0
+        timeline.clipboard_clip = None
+        timeline.last_mouse_timeline_position = None
         timeline.on_layer_selected = None
+        timeline.on_clip_added = None
+        timeline.on_status = Mock()
         timeline.redraw = Mock()
         timeline._notify_timeline_changed = Mock()
         return timeline
@@ -766,9 +878,9 @@ class TimelineToolTests(unittest.TestCase):
         self.assertFalse(timeline.split_clip_at_playhead())
         self.assertEqual(len(layer.clips), 1)
 
-    def test_copy_tool_click_duplicates_the_clicked_clip(self):
+    def test_copy_tool_click_copies_clip_and_reports_filename(self):
         layer = Layer("Video")
-        clip = MediaClip("clip.png", start_time=1.0, duration=2.0)
+        clip = MediaClip("image.png", start_time=1.0, duration=2.0)
         layer.add_clip(clip)
         timeline = self.make_timeline(layer, clip)
         timeline.current_tool = "Copy"
@@ -780,8 +892,94 @@ class TimelineToolTests(unittest.TestCase):
 
         timeline._mouse_pressed(SimpleNamespace(x=30, y=50))
 
+        self.assertEqual(len(layer.clips), 1)
+        self.assertIsNot(timeline.clipboard_clip, clip)
+        self.assertEqual(timeline.clipboard_clip.file_path, "image.png")
+        timeline.on_status.assert_called_once_with(
+            "image.png has been copied"
+        )
+
+    def test_cut_tool_splits_at_clicked_time_not_playhead(self):
+        layer = Layer("Video")
+        clip = MediaClip("clip.png", start_time=1.0, duration=4.0)
+        layer.add_clip(clip)
+        timeline = self.make_timeline(layer, clip, current_time=1.5)
+        timeline.current_tool = "Cut"
+        timeline.pixels_per_second = 10
+        timeline.canvas = Mock()
+        timeline.canvas.canvasx.side_effect = lambda value: value
+        timeline.canvas.canvasy.side_effect = lambda value: value
+        timeline._find_clip_resize_edge = Mock(return_value=(None, None, None))
+        timeline._find_clip_at_position = Mock(return_value=(layer, clip))
+
+        timeline._mouse_pressed(SimpleNamespace(x=25, y=50))
+
+        self.assertEqual(clip.duration, 1.5)
+        self.assertEqual(layer.clips[1].start_time, 2.5)
+        self.assertEqual(layer.clips[1].duration, 2.5)
+
+    def test_paste_tool_places_copied_clip_at_mouse_timeline_position(self):
+        layer = Layer("Video")
+        source = MediaClip(
+            "image.png",
+            start_time=1.0,
+            duration=2.0,
+            source_start_time=0.5
+        )
+        layer.add_clip(source)
+        timeline = self.make_timeline(layer, source)
+        timeline.current_tool = "Paste"
+        timeline.clipboard_clip = source
+        timeline.canvas = Mock()
+        timeline.canvas.canvasx.side_effect = lambda value: value
+        timeline.canvas.canvasy.side_effect = lambda value: value
+
+        timeline._mouse_pressed(SimpleNamespace(x=210, y=50))
+
         self.assertEqual(len(layer.clips), 2)
-        self.assertIs(timeline.selected_clip, layer.clips[1])
+        pasted = layer.clips[1]
+        self.assertEqual(pasted.start_time, 3.0)
+        self.assertEqual(pasted.duration, source.duration)
+        self.assertEqual(pasted.source_start_time, 0.5)
+        self.assertIs(timeline.selected_clip, pasted)
+        timeline.on_status.assert_called_once_with("image.png pasted")
+
+    def test_paste_without_clipboard_reports_why_it_did_not_happen(self):
+        layer = Layer("Video")
+        timeline = self.make_timeline(layer, None)
+
+        self.assertIsNone(timeline.paste_clip_at_position(140, 50))
+
+        timeline.on_status.assert_called_once_with(
+            "Nothing has been copied yet"
+        )
+
+    def test_copy_then_paste_tool_completes_clipboard_workflow(self):
+        layer = Layer("Video")
+        source = MediaClip("image.png", start_time=0.5, duration=3.0)
+        layer.add_clip(source)
+        timeline = self.make_timeline(layer, source)
+        timeline.current_tool = "Copy"
+        timeline.canvas = Mock()
+        timeline.canvas.canvasx.side_effect = lambda value: value
+        timeline.canvas.canvasy.side_effect = lambda value: value
+        timeline._find_clip_resize_edge = Mock(return_value=(None, None, None))
+        timeline._find_clip_at_position = Mock(return_value=(layer, source))
+
+        timeline._mouse_pressed(SimpleNamespace(x=70, y=50))
+        timeline.current_tool = "Paste"
+        timeline._mouse_pressed(SimpleNamespace(x=280, y=50))
+
+        self.assertEqual(len(layer.clips), 2)
+        self.assertEqual(layer.clips[1].file_path, "image.png")
+        self.assertEqual(layer.clips[1].start_time, 4.0)
+        self.assertEqual(
+            timeline.on_status.call_args_list,
+            [
+                unittest.mock.call("image.png has been copied"),
+                unittest.mock.call("image.png pasted")
+            ]
+        )
 
     def test_resize_edge_detection_supports_video_clips(self):
         clip = SimpleNamespace(
@@ -805,6 +1003,62 @@ class TimelineToolTests(unittest.TestCase):
 
 
 class HandMouseTests(unittest.TestCase):
+    def test_calibration_bounds_map_hand_range_and_reject_tiny_area(self):
+        old_pause = pyautogui.PAUSE
+        old_failsafe = pyautogui.FAILSAFE
+        self.addCleanup(setattr, pyautogui, "PAUSE", old_pause)
+        self.addCleanup(setattr, pyautogui, "FAILSAFE", old_failsafe)
+
+        with patch("hand_tracker.pyautogui.size", return_value=(1000, 800)), \
+                patch("hand_tracker.time.monotonic", return_value=100.0):
+            mouse = HandMouseController()
+
+            self.assertTrue(
+                mouse.set_calibration_bounds(
+                    (20, 10),
+                    (180, 90),
+                    200,
+                    100
+                )
+            )
+            mouse.move(100, 50, 200, 100)
+            self.assertAlmostEqual(mouse.filter_raw_x, 499.5)
+            self.assertAlmostEqual(mouse.filter_raw_y, 399.5)
+
+            self.assertFalse(
+                mouse.set_calibration_bounds(
+                    (20, 10),
+                    (40, 20),
+                    200,
+                    100
+                )
+            )
+            self.assertEqual(
+                mouse.calibration_bounds,
+                (0.1, 0.1, 0.9, 0.9)
+            )
+
+    def test_cursor_sensitivity_changes_calibrated_reach(self):
+        old_pause = pyautogui.PAUSE
+        old_failsafe = pyautogui.FAILSAFE
+        self.addCleanup(setattr, pyautogui, "PAUSE", old_pause)
+        self.addCleanup(setattr, pyautogui, "FAILSAFE", old_failsafe)
+
+        with patch("hand_tracker.pyautogui.size", return_value=(1000, 800)), \
+                patch("hand_tracker.time.monotonic", return_value=100.0):
+            mouse = HandMouseController()
+            mouse.set_calibration_bounds(
+                (20, 10),
+                (180, 90),
+                200,
+                100
+            )
+            mouse.set_sensitivity(2.0)
+            mouse.move(60, 30, 200, 100)
+
+        self.assertEqual(mouse.filter_raw_x, 0.0)
+        self.assertEqual(mouse.filter_raw_y, 0.0)
+
     def test_drag_and_tap_use_distinct_mouse_actions(self):
         old_pause = pyautogui.PAUSE
         old_failsafe = pyautogui.FAILSAFE

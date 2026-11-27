@@ -49,9 +49,10 @@ Build reliable Select, Move, Copy, Resize, Cut, and Camera View functionality, a
 
 - **Select:** hold the ASL Y handshape for two seconds to select the Select tool.
 - **Move:** drag the selected object using smooth pointer coordinates.
-- **Copy:** duplicate the selected object once per deliberate gesture or command.
+- **Copy:** copy the selected clip to the editor clipboard, support Ctrl+C, and report its filename without duplicating it immediately.
 - **Resize:** resize only the selected object and constrain behavior according to existing timeline/display conventions.
-- **Cut:** split the selected clip at the playhead or perform the editor's existing split operation.
+- **Cut:** split the clicked clip at the clicked timeline time.
+- **Paste:** paste the copied clip into the layer and time under the timeline cursor; support Ctrl+V.
 - **Camera View:** keep this as a UI/view mode and do not execute a destructive action.
 - **Pinch click and drag:** pinch clicks immediately except when it begins on a workspace asset thumbnail; there it can drag the asset only to a valid timeline track.
 

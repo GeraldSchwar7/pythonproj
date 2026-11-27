@@ -31,7 +31,10 @@ class Workspace(tk.Frame):
 
     def __init__(
         self,
-        parent
+        parent,
+        on_status=None,
+        on_hand_control_toggle=None,
+        on_calibrate=None
     ):
 
         super().__init__(
@@ -39,6 +42,7 @@ class Workspace(tk.Frame):
             bg=BG
         )
 
+        self.on_status = on_status
         self.scene_separation_windows = []
 
         # ==================================================
@@ -111,7 +115,16 @@ class Workspace(tk.Frame):
                 self._on_timeline_changed,
 
             on_layer_selected=
-                self._on_layer_selected
+                self._on_layer_selected,
+
+            on_status=
+                on_status,
+
+            on_hand_control_toggle=
+                on_hand_control_toggle,
+
+            on_calibrate=
+                on_calibrate
         )
 
         self.timeline.grid(
@@ -165,7 +178,7 @@ class Workspace(tk.Frame):
 
         self.tools = ToolPanel(
             self,
-            on_tool_selected=self.timeline.set_tool
+            on_tool_selected=self._on_tool_selected
         )
 
         self.tools.grid(
@@ -190,6 +203,17 @@ class Workspace(tk.Frame):
         self.display.set_viewport_time(
             self.timeline.current_time
         )
+
+    def _on_tool_selected(self, tool_name):
+        self.timeline.set_tool(tool_name)
+        instructions = {
+            "Copy": "Copy: click a timeline clip",
+            "Cut": "Cut: click the clip where it should split",
+            "Paste": "Paste: click a timeline track to place the copied clip"
+        }
+        message = instructions.get(tool_name)
+        if message is not None and self.on_status is not None:
+            self.on_status(message)
 
     # ======================================================
     # ASSET DROPPED

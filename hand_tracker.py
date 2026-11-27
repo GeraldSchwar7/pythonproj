@@ -99,6 +99,7 @@ class HandTracker:
         self.pinch_tracking_grace = 0.10
         self.pinch_release_threshold_ratio = 0.42
         self.pinch_engage_threshold_ratio = 0.30
+        self.pinch_sensitivity = 1.0
         self.drag_movement_threshold = 12.0
         self.pinch_start_position = None
         self.pinch_last_position = None
@@ -118,6 +119,14 @@ class HandTracker:
 
         # 30 FPS hand detection is plenty for now.
         self.tracking_interval = 1 / 30
+
+    def set_pinch_sensitivity(self, value):
+        self.pinch_sensitivity = max(0.6, min(1.4, float(value)))
+        self.pinch_engage_threshold_ratio = 0.30 * self.pinch_sensitivity
+        self.pinch_release_threshold_ratio = 0.42 * self.pinch_sensitivity
+
+    def set_drag_movement_threshold(self, value):
+        self.drag_movement_threshold = max(6.0, min(40.0, float(value)))
 
     # ========================================================
     # PROCESS FRAME
@@ -736,6 +745,8 @@ class HandMouseController:
             0.0,
             min(1.0, float(smoothing))
         )
+        self.sensitivity = 1.0
+        self.calibration_bounds = None
 
         self.margin = margin
 
@@ -800,6 +811,42 @@ class HandMouseController:
 
         return self.enabled
 
+    def set_sensitivity(self, value):
+        self.sensitivity = max(0.5, min(2.0, float(value)))
+
+    def set_smoothing(self, value):
+        self.smoothing = max(0.0, min(1.0, float(value)))
+        self.filter_cutoff = 0.7 + 1.6 * (1.0 - self.smoothing)
+
+    def set_calibration_bounds(
+        self,
+        first_point,
+        second_point,
+        frame_width,
+        frame_height
+    ):
+        if frame_width <= 0 or frame_height <= 0:
+            return False
+
+        left, right = sorted((first_point[0], second_point[0]))
+        top, bottom = sorted((first_point[1], second_point[1]))
+        if (
+            right - left < frame_width * 0.15
+            or bottom - top < frame_height * 0.15
+        ):
+            return False
+
+        self.calibration_bounds = (
+            max(0.0, min(1.0, left / frame_width)),
+            max(0.0, min(1.0, top / frame_height)),
+            max(0.0, min(1.0, right / frame_width)),
+            max(0.0, min(1.0, bottom / frame_height))
+        )
+        return True
+
+    def clear_calibration_bounds(self):
+        self.calibration_bounds = None
+
     # ========================================================
     # MOVE CURSOR
     # ========================================================
@@ -856,10 +903,10 @@ class HandMouseController:
             return
         target_x = self.drag_origin_x + offset_x * (
             (self.screen_width - 1) / usable_width
-        )
+        ) * self.sensitivity
         target_y = self.drag_origin_y + offset_y * (
             (self.screen_height - 1) / usable_height
-        )
+        ) * self.sensitivity
         self._move_to(target_x, target_y, current_time)
 
     def move(
@@ -874,14 +921,32 @@ class HandMouseController:
         current_time = time.monotonic()
         if current_time - self.last_move_time < self.move_interval:
             return
-        margin_x = frame_width * self.margin
-        margin_y = frame_height * self.margin
-        usable_width = frame_width - (2 * margin_x)
-        usable_height = frame_height - (2 * margin_y)
-        if usable_width <= 0 or usable_height <= 0:
-            return
-        normalized_x = max(0.0, min(1.0, (finger_x - margin_x) / usable_width))
-        normalized_y = max(0.0, min(1.0, (finger_y - margin_y) / usable_height))
+        if self.calibration_bounds is None:
+            margin_x = frame_width * self.margin
+            margin_y = frame_height * self.margin
+            usable_width = frame_width - (2 * margin_x)
+            usable_height = frame_height - (2 * margin_y)
+            if usable_width <= 0 or usable_height <= 0:
+                return
+            raw_x = (finger_x - margin_x) / usable_width
+            raw_y = (finger_y - margin_y) / usable_height
+        else:
+            left, top, right, bottom = self.calibration_bounds
+            usable_width = (right - left) * frame_width
+            usable_height = (bottom - top) * frame_height
+            if usable_width <= 0 or usable_height <= 0:
+                return
+            raw_x = (finger_x - left * frame_width) / usable_width
+            raw_y = (finger_y - top * frame_height) / usable_height
+
+        normalized_x = max(
+            0.0,
+            min(1.0, 0.5 + (raw_x - 0.5) * self.sensitivity)
+        )
+        normalized_y = max(
+            0.0,
+            min(1.0, 0.5 + (raw_y - 0.5) * self.sensitivity)
+        )
         target_x = normalized_x * (self.screen_width - 1)
         target_y = normalized_y * (self.screen_height - 1)
         self._move_to(target_x, target_y, current_time)
