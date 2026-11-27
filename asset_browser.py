@@ -14,11 +14,13 @@ from settings import (
     PANEL,
     PANEL_LIGHT,
     PANEL_HOVER,
+    PANEL_DEEP,
     BORDER,
     TEXT,
     TEXT_DIM,
     FONT,
-    flat_button
+    flat_button,
+    panel_title
 )
 
 from media_clip import (
@@ -63,21 +65,29 @@ class AssetBrowser(tk.Frame):
         # TITLE
         # ==================================================
 
+        header = tk.Frame(self, bg=PANEL)
+        header.pack(fill="x", padx=13, pady=(12, 3))
+        panel_title(header, "Media Library").pack(side="left")
+        self.asset_count_label = tk.Label(
+            header,
+            text="0 ITEMS",
+            bg=PANEL_LIGHT,
+            fg=TEXT_DIM,
+            font=(FONT, 7, "bold"),
+            padx=7,
+            pady=3
+        )
+        self.asset_count_label.pack(side="right")
+
         tk.Label(
             self,
-            text="ASSETS",
+            text="Import media, then drag it into your timeline.",
             bg=PANEL,
             fg=TEXT_DIM,
-            font=(
-                "Segoe UI",
-                9,
-                "bold"
-            )
-        ).pack(
-            anchor="w",
-            padx=10,
-            pady=7
-        )
+            font=(FONT, 8),
+            wraplength=190,
+            justify="left"
+        ).pack(anchor="w", padx=13, pady=(0, 9))
 
         # ==================================================
         # IMPORT BUTTON
@@ -111,6 +121,8 @@ class AssetBrowser(tk.Frame):
             padx=5,
             pady=5
         )
+        self.thumbnail_frame.grid_columnconfigure(0, weight=1)
+        self.thumbnail_frame.grid_columnconfigure(1, weight=1)
 
     # ======================================================
     # IMPORT
@@ -209,6 +221,13 @@ class AssetBrowser(tk.Frame):
             self.assets.append(
                 file_path
             )
+            asset_count = len(self.assets)
+            self.asset_count_label.configure(
+                text=(
+                    f"{asset_count} ITEM"
+                    f"{'S' if asset_count != 1 else ''}"
+                )
+            )
 
             index = (
                 len(self.assets)
@@ -221,23 +240,29 @@ class AssetBrowser(tk.Frame):
 
             cell = tk.Frame(
                 self.thumbnail_frame,
-                bg=PANEL
+                bg=PANEL_LIGHT,
+                highlightbackground=BORDER,
+                highlightthickness=1
             )
 
             cell.grid(
                 row=index // 2,
                 column=index % 2,
-                padx=4,
-                pady=4
+                padx=5,
+                pady=5,
+                sticky="nsew"
             )
 
             button = tk.Button(
                 cell,
                 image=thumbnail,
-                bg=PANEL_LIGHT,
+                bg=PANEL_DEEP,
                 activebackground=PANEL_HOVER,
                 relief="flat",
-                cursor="hand2"
+                cursor="hand2",
+                bd=0,
+                highlightthickness=1,
+                highlightbackground=BORDER
             )
             self.asset_buttons.append(button)
 
@@ -250,14 +275,16 @@ class AssetBrowser(tk.Frame):
             tk.Label(
                 cell,
                 text=os.path.basename(file_path),
-                bg=PANEL,
+                bg=PANEL_LIGHT,
                 fg=TEXT,
                 font=(
-                    "Segoe UI",
-                    7
+                    FONT,
+                    8
                 ),
-                width=14,
-                wraplength=84,
+                width=16,
+                wraplength=100,
+                justify="center",
+                pady=5
             ).pack()
 
             # ==================================================

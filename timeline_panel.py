@@ -1,7 +1,7 @@
 import copy
 import time
 import tkinter as tk
-from settings import (PANEL, PANEL_LIGHT, PANEL_HOVER, PANEL_DEEP, BORDER, TEXT, TEXT_DIM,
+from settings import (PANEL, PANEL_LIGHT, PANEL_DEEP, CANVAS_BG, BORDER, TEXT, TEXT_DIM,
                       TEXT_MUTED, ACCENT, ACCENT_SOFT, PLAYHEAD, TRACK_A, TRACK_B, VIDEO_CLIP,
                       IMAGE_CLIP, FONT, flat_button)
 from media_clip import MediaClip
@@ -75,14 +75,28 @@ class TimelinePanel(tk.Frame):
         self.clip_resize_grab_width = 6
 
         header = tk.Frame(self, bg=PANEL)
-        header.pack(fill="x")
+        header.pack(fill="x", padx=12, pady=(9, 6))
 
-        tk.Label(header, text="TIMELINE", bg=PANEL, fg=TEXT_DIM,
-                 font=(FONT, 9, "bold")).pack(side="left", padx=(12, 8), pady=10)
+        tk.Label(
+            header,
+            text="TIMELINE",
+            bg=PANEL,
+            fg=TEXT,
+            font=(FONT, 10, "bold")
+        ).pack(side="left", padx=(0, 10))
 
-        self.time_label = tk.Label(header, text="00:00.00", bg=PANEL_DEEP, fg=TEXT,
-                                   font=("Consolas", 10, "bold"), padx=8, pady=3)
-        self.time_label.pack(side="left", padx=8)
+        self.time_label = tk.Label(
+            header,
+            text="00:00.00",
+            bg=PANEL_DEEP,
+            fg=ACCENT,
+            font=("Consolas", 11, "bold"),
+            padx=10,
+            pady=5,
+            highlightbackground=BORDER,
+            highlightthickness=1
+        )
+        self.time_label.pack(side="left", padx=(0, 10))
 
         self.undo_button = flat_button(
             header,
@@ -93,38 +107,49 @@ class TimelinePanel(tk.Frame):
         self.play_button = flat_button(
             header,
             "Play",
-            self.toggle_playback
+            self.toggle_playback,
+            accent=True
         )
-        self.play_button.pack(side="left", padx=4)
+        self.play_button.pack(side="left", padx=3)
 
         self.redo_button = flat_button(
             header,
             "Redo",
             self.redo
         )
-        self.redo_button.pack(side="left", padx=2)
+        self.redo_button.pack(side="left", padx=3)
 
         self.hand_control_button = flat_button(
             header,
             "Pause Hand",
             self._toggle_hand_control
         )
-        self.hand_control_button.pack(side="left", padx=2)
+        self.hand_control_button.pack(side="left", padx=(10, 3))
         flat_button(
             header,
             "Calibrate",
             self._open_hand_control_settings
         ).pack(side="left", padx=2)
 
-        flat_button(header, "+", self.zoom_in, width=2).pack(side="right", padx=(2, 10), pady=5)
-        flat_button(header, "−", self.zoom_out, width=2).pack(side="right", padx=2, pady=5)
+        flat_button(
+            header,
+            "+",
+            self.zoom_in,
+            width=2
+        ).pack(side="right", padx=(3, 0))
+        flat_button(
+            header,
+            "−",
+            self.zoom_out,
+            width=2
+        ).pack(side="right", padx=3)
 
         layer_toolbar = tk.Frame(self, bg=PANEL)
-        layer_toolbar.pack(fill="x", padx=8, pady=(0, 4))
+        layer_toolbar.pack(fill="x", padx=12, pady=(0, 7))
 
         tk.Label(
             layer_toolbar,
-            text="LAYERS",
+            text="TRACKS",
             bg=PANEL,
             fg=TEXT_DIM,
             font=(FONT, 8, "bold")
@@ -134,11 +159,15 @@ class TimelinePanel(tk.Frame):
         flat_button(layer_toolbar, "Delete Layer", self.delete_selected_layer).pack(side="left", padx=2)
 
         body = tk.Frame(self, bg=PANEL)
-        body.pack(fill="both", expand=True, padx=5, pady=(0, 5))
+        body.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         body.grid_rowconfigure(0, weight=1)
         body.grid_columnconfigure(0, weight=1)
 
-        self.canvas = tk.Canvas(body, bg=PANEL_DEEP, highlightthickness=0)
+        self.canvas = tk.Canvas(
+            body,
+            bg=CANVAS_BG,
+            highlightthickness=0
+        )
         from tkinter import ttk
         self.h_scroll = ttk.Scrollbar(body, orient="horizontal", command=self.canvas.xview)
         self.v_scroll = ttk.Scrollbar(body, orient="vertical", command=self.canvas.yview)

@@ -73,6 +73,28 @@ def configure_ttk(root):
     )
 
     style.configure(
+        "TEntry",
+        fieldbackground=PANEL_LIGHT,
+        foreground=TEXT,
+        insertcolor=TEXT,
+        bordercolor=BORDER,
+        padding=(7, 5),
+    )
+
+    style.configure(
+        "TScale",
+        background=PANEL,
+        troughcolor=PANEL_DEEP,
+        sliderlength=18,
+    )
+    style.configure(
+        "Horizontal.TScale",
+        background=PANEL,
+        troughcolor=PANEL_DEEP,
+        sliderlength=18,
+    )
+
+    style.configure(
         "TNotebook",
         background=PANEL,
         borderwidth=0,
@@ -89,7 +111,7 @@ def configure_ttk(root):
     style.map(
         "TNotebook.Tab",
         background=[("selected", PANEL_LIGHT), ("active", PANEL_HOVER)],
-        foreground=[("selected", TEXT), ("active", TEXT)],
+        foreground=[("selected", ACCENT), ("active", TEXT)],
     )
 
     style.configure(
@@ -108,6 +130,14 @@ def configure_ttk(root):
         arrowcolor=TEXT_DIM,
         width=11,
     )
+    style.configure(
+        "Horizontal.TProgressbar",
+        background=ACCENT,
+        troughcolor=PANEL_DEEP,
+        bordercolor=PANEL_DEEP,
+        lightcolor=ACCENT,
+        darkcolor=ACCENT,
+    )
 
 
 def flat_button(parent, text, command=None, accent=False, width=None):
@@ -116,22 +146,25 @@ def flat_button(parent, text, command=None, accent=False, width=None):
 
     bg = ACCENT if accent else PANEL_LIGHT
     active = ACCENT_HOVER if accent else PANEL_HOVER
+    foreground = BG if accent else TEXT
     return tk.Button(
         parent,
         text=text,
         command=command,
         width=width,
         bg=bg,
-        fg=TEXT,
+        fg=foreground,
         activebackground=active,
-        activeforeground=TEXT,
+        activeforeground=foreground,
         relief="flat",
         bd=0,
-        highlightthickness=0,
+        highlightthickness=1,
+        highlightbackground=BORDER if not accent else ACCENT,
+        highlightcolor=ACCENT,
         cursor="hand2",
         font=(FONT, FONT_SMALL, "bold"),
-        padx=10,
-        pady=6,
+        padx=12,
+        pady=7,
     )
 
 

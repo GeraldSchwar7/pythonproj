@@ -17,7 +17,10 @@ except ImportError:
 from settings import (
     BG,
     PANEL,
+    PANEL_LIGHT,
+    PANEL_HOVER,
     PANEL_DEEP,
+    ACCENT,
     BORDER,
     TEXT,
     TEXT_DIM,
@@ -104,26 +107,36 @@ class SceneSeparationWindow(tk.Toplevel):
         self.preview_canvas.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
 
         controls = tk.Frame(main, bg=PANEL)
-        controls.grid(row=0, column=1, sticky="nsew")
+        controls.grid(row=0, column=1, sticky="nsew", padx=8, pady=8)
 
         tk.Label(
             controls,
-            text="LOCAL SCENE DECOMPOSITION",
+            text="SCENE SEPARATION",
+            bg=PANEL,
+            fg=TEXT,
+            font=(FONT, 12, "bold"),
+        ).pack(anchor="w", pady=(3, 3))
+
+        tk.Label(
+            controls,
+            text="Create depth-based layers from the selected frame.",
             bg=PANEL,
             fg=TEXT_DIM,
-            font=(FONT, 9, "bold"),
-        ).pack(anchor="w", pady=(2, 10))
+            font=(FONT, 8),
+            wraplength=280,
+            justify="left"
+        ).pack(anchor="w", pady=(0, 13))
 
-        resolution_row = tk.Frame(controls, bg=PANEL)
+        resolution_row = tk.Frame(controls, bg=PANEL_LIGHT)
         resolution_row.pack(fill="x", pady=3)
         tk.Label(
             resolution_row,
             text="Processing width",
-            bg=PANEL,
+            bg=PANEL_LIGHT,
             fg=TEXT,
             font=(FONT, 9),
-        ).pack(side="left")
-        tk.OptionMenu(
+        ).pack(side="left", padx=9, pady=7)
+        resolution_menu = tk.OptionMenu(
             resolution_row,
             self.resolution,
             "480",
@@ -132,17 +145,35 @@ class SceneSeparationWindow(tk.Toplevel):
             "1280",
             "1920",
             "Original",
-        ).pack(side="right")
+        )
+        resolution_menu.configure(
+            bg=PANEL_LIGHT,
+            fg=TEXT,
+            activebackground=PANEL_HOVER,
+            activeforeground=TEXT,
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2"
+        )
+        resolution_menu["menu"].configure(
+            bg=PANEL_LIGHT,
+            fg=TEXT,
+            activebackground=ACCENT,
+            activeforeground=BG,
+            bd=0
+        )
+        resolution_menu.pack(side="right", padx=7, pady=3)
 
-        layer_count_row = tk.Frame(controls, bg=PANEL)
+        layer_count_row = tk.Frame(controls, bg=PANEL_LIGHT)
         layer_count_row.pack(fill="x", pady=3)
         tk.Label(
             layer_count_row,
             text="Number of layers",
-            bg=PANEL,
+            bg=PANEL_LIGHT,
             fg=TEXT,
             font=(FONT, 9),
-        ).pack(side="left")
+        ).pack(side="left", padx=9, pady=7)
         tk.Spinbox(
             layer_count_row,
             from_=2,
@@ -150,12 +181,16 @@ class SceneSeparationWindow(tk.Toplevel):
             width=5,
             textvariable=self.layer_count,
             justify="center",
-            bg=PANEL,
+            bg=PANEL_DEEP,
             fg=TEXT,
-            buttonbackground=PANEL,
+            insertbackground=TEXT,
+            buttonbackground=PANEL_LIGHT,
             relief="flat",
-            readonlybackground=PANEL,
-        ).pack(side="right")
+            readonlybackground=PANEL_DEEP,
+            highlightthickness=0,
+            buttonuprelief="flat",
+            buttondownrelief="flat"
+        ).pack(side="right", padx=9, pady=5)
 
         flat_button(
             controls,
@@ -180,7 +215,7 @@ class SceneSeparationWindow(tk.Toplevel):
             bg=PANEL,
             fg=TEXT_DIM,
             font=(FONT, 9, "bold"),
-        ).pack(anchor="w", pady=(8, 4))
+        ).pack(anchor="w", pady=(14, 5))
 
         self.layers_frame = tk.Frame(controls, bg=PANEL)
         self.layers_frame.pack(fill="both", expand=True)

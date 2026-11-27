@@ -2,8 +2,22 @@ import tkinter as tk
 from tkinter import ttk
 
 import cv2
-from settings import (BG, PANEL, PANEL_LIGHT, BORDER, TEXT, TEXT_DIM, ACCENT, FONT,
-                      WINDOW_WIDTH, WINDOW_HEIGHT, configure_ttk)
+from settings import (
+    BG,
+    PANEL,
+    PANEL_LIGHT,
+    BORDER,
+    TEXT,
+    TEXT_DIM,
+    ACCENT,
+    ACCENT_HOVER,
+    ACCENT_SOFT,
+    SUCCESS,
+    FONT,
+    WINDOW_WIDTH,
+    WINDOW_HEIGHT,
+    configure_ttk
+)
 from camera_manager import CameraManager
 from hand_tracker import HandTracker, HandMouseController
 from workspace import Workspace
@@ -239,7 +253,7 @@ class CameraViewerApp:
         window = tk.Toplevel(self.root)
         self.hand_settings_window = window
         window.title("Hand Control Calibration")
-        window.geometry("460x440")
+        window.geometry("480x460")
         window.transient(self.root)
         window.configure(bg=PANEL)
 
@@ -332,7 +346,20 @@ class CameraViewerApp:
             pady=(16, 8)
         )
         capture_state = {"points": [], "finished": False}
-        capture_button = tk.Button(settings_frame, text="Capture upper-left")
+        capture_button = tk.Button(
+            settings_frame,
+            text="Capture upper-left",
+            bg=ACCENT,
+            fg=BG,
+            activebackground=ACCENT_HOVER,
+            activeforeground=BG,
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            font=(FONT, 9, "bold"),
+            padx=12,
+            pady=8
+        )
         capture_button.grid(
             row=6,
             column=0,
@@ -423,7 +450,7 @@ class CameraViewerApp:
         menu_frame = tk.Frame(
             self.root,
             bg=PANEL,
-            height=58,
+            height=70,
             highlightbackground=BORDER,
             highlightthickness=1
         )
@@ -431,39 +458,64 @@ class CameraViewerApp:
         menu_frame.pack_propagate(False)
 
         brand = tk.Frame(menu_frame, bg=PANEL)
-        brand.pack(side="left", padx=16, fill="y")
+        brand.pack(side="left", padx=(18, 15), fill="y")
 
         tk.Label(
-            brand, text="PROJECT", bg=PANEL, fg=TEXT_DIM,
-            font=(FONT, 8, "bold")
-        ).pack(anchor="w", pady=(9, 0))
-
-        tk.Label(
-            brand, text="MONDAY", bg=PANEL, fg=TEXT,
+            brand,
+            text="M",
+            bg=ACCENT,
+            fg=BG,
+            width=2,
+            height=1,
             font=(FONT, 15, "bold")
-        ).pack(anchor="w", pady=(0, 7))
+        ).pack(side="left", padx=(0, 11), pady=15)
 
-        separator = tk.Frame(menu_frame, bg=ACCENT, width=3)
-        separator.pack(side="left", fill="y", pady=12)
+        brand_text = tk.Frame(brand, bg=PANEL)
+        brand_text.pack(side="left", fill="y")
+        tk.Label(
+            brand_text,
+            text="MONDAY",
+            bg=PANEL,
+            fg=TEXT,
+            font=(FONT, 14, "bold")
+        ).pack(anchor="w", pady=(13, 0))
+        tk.Label(
+            brand_text,
+            text="VIDEO STUDIO",
+            bg=PANEL,
+            fg=TEXT_DIM,
+            font=(FONT, 7, "bold")
+        ).pack(anchor="w", pady=(0, 12))
+
+        separator = tk.Frame(menu_frame, bg=BORDER, width=1)
+        separator.pack(side="left", fill="y", pady=14)
 
         tk.Label(
-            menu_frame, text="Gesture Video Workspace", bg=PANEL, fg=TEXT_DIM,
-            font=(FONT, 9)
-        ).pack(side="left", padx=12)
+            menu_frame,
+            text="GESTURE EDITOR",
+            bg=ACCENT_SOFT,
+            fg=ACCENT,
+            font=(FONT, 8, "bold"),
+            padx=11,
+            pady=6
+        ).pack(side="left", padx=18)
 
-        camera_frame = tk.Frame(menu_frame, bg=PANEL)
-        camera_frame.pack(side="right", padx=16)
+        camera_frame = tk.Frame(menu_frame, bg=PANEL_LIGHT)
+        camera_frame.pack(side="right", padx=18, pady=14)
 
         tk.Label(
-            camera_frame, text="CAMERA", bg=PANEL, fg=TEXT_DIM,
+            camera_frame,
+            text="CAMERA",
+            bg=PANEL_LIGHT,
+            fg=TEXT_DIM,
             font=(FONT, 8, "bold")
-        ).pack(side="left", padx=(0, 8))
+        ).pack(side="left", padx=(10, 7), pady=5)
 
         self.camera_dropdown = ttk.Combobox(
             camera_frame, textvariable=self.selected_camera,
-            values=self.camera_list, state="readonly", width=6
+            values=self.camera_list, state="readonly", width=7
         )
-        self.camera_dropdown.pack(side="left")
+        self.camera_dropdown.pack(side="left", padx=(0, 7), pady=4)
         self.camera_dropdown.bind("<<ComboboxSelected>>", self.change_camera)
 
     # ========================================================
@@ -475,7 +527,7 @@ class CameraViewerApp:
         status_frame = tk.Frame(
             self.root,
             bg=PANEL,
-            height=30,
+            height=34,
             highlightbackground=BORDER,
             highlightthickness=1
         )
@@ -485,21 +537,24 @@ class CameraViewerApp:
         )
 
         tk.Label(
-            status_frame, text="●", bg=PANEL, fg="#48c78e",
+            status_frame,
+            text="●",
+            bg=PANEL,
+            fg=SUCCESS,
             font=(FONT, 8)
-        ).pack(side="left", padx=(14, 5), pady=5)
+        ).pack(side="left", padx=(14, 7), pady=7)
 
         self.status_label = tk.Label(
             status_frame,
             text="Status: Ready",
             bg=PANEL,
-            fg=TEXT_DIM,
+            fg=TEXT,
             font=(FONT, 9)
         )
 
         self.status_label.pack(
             side="left",
-            pady=5
+            pady=7
         )
 
         tk.Label(
@@ -508,8 +563,10 @@ class CameraViewerApp:
                 "GESTURE MODE  •  HOLD 2s TO SELECT  •  "
                 "PINCH = CLICK  •  ASSET → TIMELINE = DRAG"
             ),
-            bg=PANEL, fg=TEXT_DIM, font=(FONT, 8, "bold")
-        ).pack(side="right", padx=14, pady=5)
+            bg=PANEL,
+            fg=TEXT_DIM,
+            font=(FONT, 8, "bold")
+        ).pack(side="right", padx=14, pady=7)
 
     # ========================================================
     # CAMERA

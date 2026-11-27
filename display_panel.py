@@ -14,10 +14,12 @@ from settings import (
     PANEL,
     PANEL_LIGHT,
     PANEL_HOVER,
-    PANEL_DEEP,
     BORDER,
     TEXT,
     TEXT_DIM,
+    ACCENT,
+    ACCENT_SOFT,
+    CANVAS_BG,
     FONT,
     flat_button
 )
@@ -89,24 +91,42 @@ class DisplayPanel(tk.Frame):
         )
 
         title_bar.pack(
-            fill="x"
+            fill="x",
+            padx=13,
+            pady=(10, 7)
         )
 
         tk.Label(
             title_bar,
-            text="PROGRAM MONITOR",
+            text="PREVIEW",
             bg=PANEL,
-            fg=TEXT_DIM,
+            fg=TEXT,
             font=(
-                "Segoe UI",
-                9,
+                FONT,
+                10,
                 "bold"
             )
         ).pack(
-            side="left",
-            padx=10,
-            pady=7
+            side="left"
         )
+
+        tk.Label(
+            title_bar,
+            text="SOURCE  /  COMPOSITION",
+            bg=PANEL,
+            fg=TEXT_DIM,
+            font=(FONT, 7, "bold")
+        ).pack(side="left", padx=10)
+
+        tk.Label(
+            title_bar,
+            text="MONITOR",
+            bg=ACCENT_SOFT,
+            fg=ACCENT,
+            font=(FONT, 7, "bold"),
+            padx=7,
+            pady=3
+        ).pack(side="right")
 
     # ======================================================
     # TABS
@@ -179,7 +199,7 @@ class DisplayPanel(tk.Frame):
         self.camera_container = (
             tk.Frame(
                 self.camera_tab,
-                bg="black"
+                bg=CANVAS_BG
             )
         )
 
@@ -193,7 +213,7 @@ class DisplayPanel(tk.Frame):
         self.camera_display = (
             tk.Label(
                 self.camera_container,
-                bg="black"
+                bg=CANVAS_BG
             )
         )
 
@@ -211,7 +231,7 @@ class DisplayPanel(tk.Frame):
         self.viewport_canvas = (
             tk.Canvas(
                 self.viewport_tab,
-                bg=PANEL_DEEP,
+                bg=CANVAS_BG,
                 highlightthickness=0
             )
         )

@@ -53,20 +53,21 @@ class Workspace(tk.Frame):
         self.grid_columnconfigure(
             0,
             weight=1,
-            minsize=220
+            minsize=205
         )
 
         # Main editor
         self.grid_columnconfigure(
             1,
-            weight=4
+            weight=5,
+            minsize=380
         )
 
         # Layers
         self.grid_columnconfigure(
             2,
             weight=1,
-            minsize=220
+            minsize=205
         )
 
         # Display
@@ -94,8 +95,8 @@ class Workspace(tk.Frame):
             column=1,
             columnspan=2,
             sticky="nsew",
-            padx=5,
-            pady=5
+            padx=7,
+            pady=7
         )
 
         # ==================================================
@@ -131,8 +132,8 @@ class Workspace(tk.Frame):
             row=1,
             column=1,
             sticky="nsew",
-            padx=5,
-            pady=5
+            padx=7,
+            pady=(0, 7)
         )
 
         # ==================================================
@@ -149,8 +150,8 @@ class Workspace(tk.Frame):
             row=1,
             column=2,
             sticky="nsew",
-            padx=5,
-            pady=5
+            padx=7,
+            pady=(0, 7)
         )
 
         # ==================================================
@@ -168,8 +169,8 @@ class Workspace(tk.Frame):
             row=0,
             column=0,
             sticky="nsew",
-            padx=5,
-            pady=5
+            padx=7,
+            pady=7
         )
 
         # ==================================================
@@ -185,8 +186,8 @@ class Workspace(tk.Frame):
             row=1,
             column=0,
             sticky="nsew",
-            padx=5,
-            pady=5
+            padx=7,
+            pady=(0, 7)
         )
 
         # ==================================================
