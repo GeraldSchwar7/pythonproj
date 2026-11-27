@@ -37,7 +37,7 @@ This is a review list for improving the camera-driven editor beyond the current 
 
 - Pinching outside an asset thumbnail clicks immediately once, when thumb and index first touch.
 - A pinch that starts on an asset thumbnail starts a native asset drag; the existing timeline drop handler accepts it only when released on a valid track.
-- Select uses the original OK-sign pose and activates after a two-second hold.
+- Select uses the ASL Y handshape and activates after a two-second hold.
 - Asset dragging requires sustained palm-center displacement; index-finger curling into the pinch does not start a drag.
 - A short tracking dropout is tolerated, while a longer loss cancels the gesture instead of generating an accidental click.
 - Cursor smoothing uses a speed-responsive low-pass filter: small motion is damped while fast sweeps receive a higher response.

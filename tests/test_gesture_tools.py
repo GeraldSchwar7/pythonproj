@@ -15,9 +15,9 @@ from timeline_panel import TimelinePanel
 
 
 class GestureControllerTests(unittest.TestCase):
-    def test_ok_sign_select_gesture_uses_the_original_pose(self):
+    def test_asl_y_select_gesture_is_distinct_from_move_fist(self):
         controller = GestureController()
-        pinch_landmarks = {
+        ok_sign_landmarks = {
             0: (0, 0),
             4: (5, 40),
             5: (0, 30),
@@ -32,6 +32,42 @@ class GestureControllerTests(unittest.TestCase):
             17: (60, 90),
             18: (60, 70),
             20: (60, 140)
+        }
+        asl_y_landmarks = {
+            0: (0, 0),
+            2: (20, 15),
+            3: (30, 5),
+            4: (50, 5),
+            5: (0, 30),
+            6: (10, 20),
+            8: (5, 10),
+            9: (0, 100),
+            10: (0, 90),
+            12: (0, 70),
+            13: (30, 100),
+            14: (30, 80),
+            16: (20, 70),
+            17: (60, 90),
+            18: (60, 70),
+            20: (90, 100)
+        }
+        move_fist_landmarks = {
+            0: (0, 0),
+            2: (20, 15),
+            3: (10, 20),
+            4: (5, 10),
+            5: (0, 30),
+            6: (10, 20),
+            8: (5, 10),
+            9: (0, 100),
+            10: (0, 90),
+            12: (0, 70),
+            13: (30, 100),
+            14: (30, 80),
+            16: (20, 70),
+            17: (60, 90),
+            18: (60, 70),
+            20: (40, 65)
         }
         open_palm_landmarks = {
             0: (0, 0),
@@ -52,7 +88,14 @@ class GestureControllerTests(unittest.TestCase):
             20: (60, 140)
         }
 
-        self.assertEqual(controller.detect_tool_gesture(pinch_landmarks), "Select")
+        self.assertEqual(controller.detect_tool_gesture(asl_y_landmarks), "Select")
+        self.assertFalse(controller.is_asl_y(ok_sign_landmarks))
+        self.assertNotEqual(
+            controller.detect_tool_gesture(ok_sign_landmarks),
+            "Select"
+        )
+        self.assertFalse(controller.is_asl_y(move_fist_landmarks))
+        self.assertEqual(controller.detect_tool_gesture(move_fist_landmarks), "Move")
         self.assertIsNone(controller.detect_tool_gesture(open_palm_landmarks))
         self.assertFalse(
             controller.update_tool_gesture("Select")["triggered"]

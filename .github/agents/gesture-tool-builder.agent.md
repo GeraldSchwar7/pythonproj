@@ -39,7 +39,7 @@ Build reliable Select, Move, Copy, Resize, Cut, and Camera View functionality, a
    - send mouse-down from the original asset thumbnail, and release at the destination so the timeline's existing drop validation accepts only valid timeline tracks,
    - emit one immediate click when thumb and index first touch outside an asset thumbnail; do not emit another click on release,
    - when a pinch begins on an asset thumbnail, start the native asset drag and let the existing timeline drop validation decide whether to add the asset,
-   - recognize Select with the original OK sign (thumb and index touching, middle/ring/pinky extended) and activate it after two seconds,
+   - recognize Select with the ASL Y handshape (thumb and pinky extended, index/middle/ring curled) and activate it after two seconds,
    - release any held mouse button during application shutdown or control disable.
 7. Respect existing Tkinter and threading behavior. Do not block the camera update loop or Tkinter main loop.
 8. Preserve existing public APIs unless a change is required and is followed by focused call-site updates.
@@ -47,7 +47,7 @@ Build reliable Select, Move, Copy, Resize, Cut, and Camera View functionality, a
 
 ## Tool behavior
 
-- **Select:** hold the OK sign for two seconds to select the Select tool.
+- **Select:** hold the ASL Y handshape for two seconds to select the Select tool.
 - **Move:** drag the selected object using smooth pointer coordinates.
 - **Copy:** duplicate the selected object once per deliberate gesture or command.
 - **Resize:** resize only the selected object and constrain behavior according to existing timeline/display conventions.

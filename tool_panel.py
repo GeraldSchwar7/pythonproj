@@ -18,7 +18,7 @@ class ToolPanel(tk.Frame):
         tk.Label(header, text="EDIT", bg=PANEL, fg=TEXT_DIM, font=(FONT, 8)).pack(side="right")
 
         tools = [
-            ("Select", "↖", "👌", "Choose clips and layers"),
+            ("Select", "↖", "🤙", "Choose clips and layers (ASL Y)"),
             ("Move", "✥", "✊", "Move selected media"),
             ("Copy", "▣", "C", "Duplicate selection"),
             ("Resize", "↔", "🤞", "Scale selected media"),

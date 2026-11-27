@@ -149,7 +149,36 @@ class GestureController:
             and fingers["pinky"]
         )
 
-    # SELECT: OK SIGN
+    # SELECT: ASL Y
+    def is_asl_y(self, landmarks):
+        if landmarks is None:
+            return False
+
+        fingers = self._finger_states(landmarks)
+        if (
+            fingers["index"]
+            or fingers["middle"]
+            or fingers["ring"]
+            or not fingers["pinky"]
+        ):
+            return False
+
+        thumb_tip = self._distance(landmarks, 4, 0)
+        thumb_ip = self._distance(landmarks, 3, 0)
+        thumb_mcp = self._distance(landmarks, 2, 0)
+        if (
+            thumb_tip is None
+            or thumb_ip is None
+            or thumb_mcp is None
+        ):
+            return False
+
+        return (
+            thumb_tip > thumb_ip
+            and thumb_tip > thumb_mcp
+        )
+
+    # Legacy open-palm detector
     def is_open_palm(self, landmarks):
         if landmarks is None:
             return False
@@ -351,7 +380,7 @@ class GestureController:
         if landmarks is None:
             return None
 
-        if self.is_ok_sign(
+        if self.is_asl_y(
             landmarks
         ):
             return "Select"
