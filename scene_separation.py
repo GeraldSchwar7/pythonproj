@@ -56,6 +56,356 @@ def clear_scene_separation_cache():
         )
 
 
+MAX_MASK_CONTROL_POINTS = 32
+
+
+def _simplify_contour(contour, force=False):
+    contour_points = contour.reshape(-1, 2).astype(np.float32)
+    if len(contour_points) <= MAX_MASK_CONTROL_POINTS and not force:
+        return contour_points
+
+    perimeter = cv2.arcLength(contour, True)
+    epsilon = max(0.75, perimeter * 0.015)
+    major_points = cv2.approxPolyDP(contour, epsilon, True)
+    while len(major_points) > MAX_MASK_CONTROL_POINTS:
+        epsilon *= 1.5
+        major_points = cv2.approxPolyDP(contour, epsilon, True)
+
+    selected = set()
+    for point in major_points.reshape(-1, 2):
+        distances = np.sum((contour_points - point) ** 2, axis=1)
+        selected.add(int(np.argmin(distances)))
+    if len(selected) < 3:
+        selected.update(
+            (0, len(contour_points) // 3, 2 * len(contour_points) // 3)
+        )
+
+    while len(selected) < MAX_MASK_CONTROL_POINTS:
+        ordered = sorted(selected)
+        best_index = None
+        best_distance = 0.75
+        for position, start_index in enumerate(ordered):
+            end_index = ordered[(position + 1) % len(ordered)]
+            arc_length = (end_index - start_index) % len(contour_points)
+            if arc_length <= 1:
+                continue
+
+            arc_indices = [
+                (start_index + offset) % len(contour_points)
+                for offset in range(1, arc_length)
+            ]
+            arc_points = contour_points[arc_indices]
+            start = contour_points[start_index]
+            segment = contour_points[end_index] - start
+            segment_length = float(np.dot(segment, segment))
+            if segment_length == 0:
+                distances = np.linalg.norm(arc_points - start, axis=1)
+            else:
+                projection = np.clip(
+                    np.sum((arc_points - start) * segment, axis=1)
+                    / segment_length,
+                    0.0,
+                    1.0,
+                )
+                closest = start + projection[:, np.newaxis] * segment
+                distances = np.linalg.norm(arc_points - closest, axis=1)
+            farthest = int(np.argmax(distances))
+            if distances[farthest] > best_distance:
+                best_index = arc_indices[farthest]
+                best_distance = float(distances[farthest])
+
+        if best_index is None:
+            break
+        selected.add(best_index)
+
+    return contour_points[sorted(selected)]
+
+
+def _contour_depth(hierarchy, contour_index):
+    depth = 0
+    parent = hierarchy[contour_index][3]
+    while parent >= 0:
+        depth += 1
+        parent = hierarchy[parent][3]
+    return depth
+
+
+def extract_mask_contours(mask, simplify=False):
+    binary_mask = (mask > 0).astype(np.uint8)
+    contours, hierarchy = cv2.findContours(
+        binary_mask,
+        cv2.RETR_TREE,
+        cv2.CHAIN_APPROX_SIMPLE,
+    )
+    if hierarchy is None:
+        return []
+
+    hierarchy = hierarchy[0]
+    result = []
+    for index, contour in enumerate(contours):
+        points = _simplify_contour(contour, force=simplify)
+        if len(points) < 3:
+            continue
+        result.append(
+            (
+                points.astype(np.float32),
+                _contour_depth(hierarchy, index),
+            )
+        )
+    return result
+
+
+def rasterize_mask_contours(shape, contours):
+    height, width = shape[:2]
+    mask = np.zeros((height, width), dtype=np.float32)
+    if not contours:
+        return mask
+
+    all_points = np.concatenate(
+        [points for points, _ in contours],
+        axis=0,
+    )
+    left = max(0, int(np.floor(all_points[:, 0].min())))
+    right = min(width - 1, int(np.ceil(all_points[:, 0].max())))
+    top = max(0, int(np.floor(all_points[:, 1].min())))
+    bottom = min(height - 1, int(np.ceil(all_points[:, 1].max())))
+    if left > right or top > bottom:
+        return mask
+
+    region = np.zeros((bottom - top + 1, right - left + 1), dtype=np.uint8)
+    for points, depth in sorted(contours, key=lambda item: item[1]):
+        polygon = np.rint(
+            points - np.asarray((left, top), dtype=np.float32)
+        ).astype(np.int32)
+        cv2.fillPoly(region, [polygon], 255 if depth % 2 == 0 else 0)
+    mask[top : bottom + 1, left : right + 1] = region.astype(np.float32) / 255.0
+    return mask
+
+
+def normalize_mask_edges(mask):
+    binary_mask = (mask > 0).astype(np.uint8) * 255
+    if not np.any(binary_mask):
+        return binary_mask.astype(np.float32)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    normalized = cv2.morphologyEx(
+        binary_mask,
+        cv2.MORPH_CLOSE,
+        kernel,
+    )
+    normalized = cv2.morphologyEx(
+        normalized,
+        cv2.MORPH_OPEN,
+        kernel,
+    )
+    contours = extract_mask_contours(normalized, simplify=True)
+    return rasterize_mask_contours(mask.shape, contours)
+
+
+def copy_mask_contours(contours):
+    return [
+        (points.copy(), depth)
+        for points, depth in contours
+    ]
+
+
+def insert_contour_point(contours, x, y, max_distance):
+    closest = None
+    closest_distance = float(max_distance)
+    point = np.asarray((x, y), dtype=np.float32)
+
+    for contour_index, (points, _) in enumerate(contours):
+        for segment_index in range(len(points)):
+            start = points[segment_index]
+            end = points[(segment_index + 1) % len(points)]
+            segment = end - start
+            length_squared = float(np.dot(segment, segment))
+            if length_squared == 0:
+                continue
+            fraction = float(
+                np.clip(np.dot(point - start, segment) / length_squared, 0, 1)
+            )
+            projected = start + fraction * segment
+            distance = float(np.linalg.norm(point - projected))
+            if distance <= closest_distance:
+                closest = (
+                    contour_index,
+                    segment_index,
+                    fraction,
+                    projected,
+                )
+                closest_distance = distance
+
+    if closest is None:
+        return copy_mask_contours(contours), None
+
+    contour_index, segment_index, fraction, projected = closest
+    points, depth = contours[contour_index]
+    if np.min(np.linalg.norm(points - projected, axis=1)) <= 2.0:
+        return copy_mask_contours(contours), None
+
+    insertion_index = segment_index + 1
+    updated = copy_mask_contours(contours)
+    updated_points = np.insert(points, insertion_index, projected, axis=0)
+    updated[contour_index] = (updated_points, depth)
+    return updated, (contour_index, segment_index, fraction, insertion_index)
+
+
+def is_valid_contour_edit(source_points, target_points):
+    if len(source_points) != len(target_points) or len(target_points) < 3:
+        return False
+
+    source_area = cv2.contourArea(source_points, oriented=True)
+    target_area = cv2.contourArea(target_points, oriented=True)
+    if source_area * target_area <= 0:
+        return False
+
+    count = len(target_points)
+    for first_index in range(count):
+        first_start = target_points[first_index]
+        first_end = target_points[(first_index + 1) % count]
+        for second_index in range(first_index + 1, count):
+            if second_index in (
+                first_index,
+                (first_index + 1) % count,
+                (first_index - 1) % count,
+            ):
+                continue
+            second_start = target_points[second_index]
+            second_end = target_points[(second_index + 1) % count]
+            if _segments_intersect(
+                first_start,
+                first_end,
+                second_start,
+                second_end,
+            ):
+                return False
+    return True
+
+
+def remove_redundant_contour_points(
+    source_points,
+    target_points,
+    tolerance=0.75,
+):
+    if len(source_points) != len(target_points):
+        raise ValueError("Source and edited contours must have matching points")
+
+    source = np.asarray(source_points, dtype=np.float32).copy()
+    target = np.asarray(target_points, dtype=np.float32).copy()
+    removed = 0
+    while len(source) > 3:
+        redundant_index = None
+        for index in range(len(source)):
+            previous = (index - 1) % len(source)
+            following = (index + 1) % len(source)
+            source_distance = _point_segment_distance(
+                source[index],
+                source[previous],
+                source[following],
+            )
+            target_distance = _point_segment_distance(
+                target[index],
+                target[previous],
+                target[following],
+            )
+            if max(source_distance, target_distance) <= tolerance:
+                redundant_index = index
+                break
+
+        if redundant_index is None:
+            break
+        source = np.delete(source, redundant_index, axis=0)
+        target = np.delete(target, redundant_index, axis=0)
+        removed += 1
+    return source, target, removed
+
+
+def _point_segment_distance(point, start, end):
+    segment = end - start
+    length_squared = float(np.dot(segment, segment))
+    if length_squared == 0:
+        return float(np.linalg.norm(point - start))
+    fraction = float(
+        np.clip(np.dot(point - start, segment) / length_squared, 0.0, 1.0)
+    )
+    closest = start + fraction * segment
+    return float(np.linalg.norm(point - closest))
+
+
+def _segments_intersect(first_start, first_end, second_start, second_end):
+    def orientation(point_a, point_b, point_c):
+        return (
+            (point_b[0] - point_a[0]) * (point_c[1] - point_a[1])
+            - (point_b[1] - point_a[1]) * (point_c[0] - point_a[0])
+        )
+
+    first_a = orientation(first_start, first_end, second_start)
+    first_b = orientation(first_start, first_end, second_end)
+    second_a = orientation(second_start, second_end, first_start)
+    second_b = orientation(second_start, second_end, first_end)
+    return first_a * first_b < 0 and second_a * second_b < 0
+
+
+def compose_layer_masks(back_to_front_masks):
+    if not back_to_front_masks:
+        return []
+
+    shape = back_to_front_masks[0].shape
+    covered = np.zeros(shape, dtype=bool)
+    composed = [None] * len(back_to_front_masks)
+    for index in range(len(back_to_front_masks) - 1, -1, -1):
+        source_mask = back_to_front_masks[index]
+        if source_mask.shape != shape:
+            raise ValueError("All layer masks must have the same dimensions")
+        if index == 0 and len(back_to_front_masks) > 1:
+            visible_mask = ~covered
+        else:
+            visible_mask = (source_mask > 0) & ~covered
+        composed[index] = visible_mask.astype(np.float32)
+        covered |= visible_mask
+    return composed
+
+
+def propagate_layer_mask_change(
+    back_to_front_masks,
+    previous_masks,
+    changed_index,
+):
+    if len(previous_masks) != len(back_to_front_masks):
+        raise ValueError("Previous and current layer counts must match")
+    if not 0 <= changed_index < len(back_to_front_masks):
+        raise ValueError("Changed layer index is out of range")
+
+    candidates = [mask.copy() for mask in back_to_front_masks]
+    composed = compose_layer_masks(candidates)
+    if changed_index > 0:
+        released = (
+            (previous_masks[changed_index] > 0)
+            & (composed[changed_index] == 0)
+        )
+        if released.any():
+            candidates[changed_index - 1][released] = 1.0
+            composed = compose_layer_masks(candidates)
+    return candidates, composed
+
+
+def _draw_mask_contours(mask, contours):
+    height, width = mask.shape[:2]
+    control_edges = np.zeros((height, width), dtype=np.uint8)
+    for points, _ in contours:
+        polygon = np.rint(points).astype(np.int32).reshape(-1, 1, 2)
+        cv2.polylines(
+            control_edges,
+            [polygon],
+            True,
+            255,
+            1,
+            lineType=cv2.LINE_AA,
+        )
+    return control_edges
+
+
 class SceneSeparationWindow(tk.Toplevel):
     def __init__(
         self,
@@ -82,6 +432,15 @@ class SceneSeparationWindow(tk.Toplevel):
         self.source_frame = None
         self.depth_map = None
         self.layer_masks = []
+        self.base_layer_masks = []
+        self.deformed_layer_masks = []
+        self.mask_source_contours = []
+        self.mask_target_contours = []
+        self.mesh_editing = False
+        self._mesh_edit_start_masks = None
+        self._mesh_edit_changed_indices = set()
+        self._dragged_mesh_node = None
+        self._preview_bounds = None
         self.preview_photos = []
         self.processing = False
         self._closing = False
@@ -220,6 +579,18 @@ class SceneSeparationWindow(tk.Toplevel):
         self.layers_frame = tk.Frame(controls, bg=PANEL)
         self.layers_frame.pack(fill="both", expand=True)
 
+        self.mesh_edit_button = flat_button(
+            controls,
+            "Edit Mask Mesh",
+            self._toggle_mesh_editing,
+        )
+        self.mesh_edit_button.pack(fill="x", pady=(8, 3))
+        flat_button(
+            controls,
+            "Reset Current Mesh",
+            self._reset_current_mesh,
+        ).pack(fill="x", pady=3)
+
         flat_button(
             controls,
             "Add Layers to Timeline",
@@ -227,6 +598,11 @@ class SceneSeparationWindow(tk.Toplevel):
         ).pack(fill="x", pady=(8, 0))
 
         self.preview_canvas.bind("<Configure>", self._redraw_preview)
+        self.preview_canvas.bind("<ButtonPress-1>", self._start_mesh_drag)
+        self.preview_canvas.bind("<B1-Motion>", self._drag_mesh_node)
+        self.preview_canvas.bind("<ButtonRelease-1>", self._finish_mesh_drag)
+        self.preview_canvas.bind("<Double-Button-1>", self._insert_mask_node)
+        self.preview_canvas.bind("<ButtonPress-3>", self._delete_mask_node)
         self.protocol("WM_DELETE_WINDOW", self._close)
         self._poll_processing_job = self.after(
             50,
@@ -330,6 +706,17 @@ class SceneSeparationWindow(tk.Toplevel):
         if self.source_frame is None or self.processing:
             return
 
+        if self.mesh_editing:
+            self.processing_status.set(
+                "Finish mesh editing before processing another frame"
+            )
+            return
+
+        self.mesh_editing = False
+        self._mesh_edit_start_masks = None
+        self._mesh_edit_changed_indices.clear()
+        self._dragged_mesh_node = None
+        self.mesh_edit_button.configure(text="Edit Mask Mesh")
         self.processing = True
         self.processing_status.set("Processing locally...")
         source_frame = self.source_frame.copy()
@@ -409,6 +796,17 @@ class SceneSeparationWindow(tk.Toplevel):
                     requested_layer_count,
                 )
 
+            normalized_layers = []
+            for name, _, mask in layer_masks:
+                normalized_mask = normalize_mask_edges(mask)
+                normalized_layers.append(
+                    (
+                        name,
+                        self._mask_rgba(frame, normalized_mask),
+                        normalized_mask,
+                    )
+                )
+            layer_masks = normalized_layers
             self._processing_results.put(
                 ("result", frame, depth, layer_masks)
             )
@@ -459,6 +857,12 @@ class SceneSeparationWindow(tk.Toplevel):
         self.source_frame = None
         self.depth_map = None
         self.layer_masks = []
+        self.base_layer_masks = []
+        self.deformed_layer_masks = []
+        self.mask_source_contours = []
+        self.mask_target_contours = []
+        self._mesh_edit_start_masks = None
+        self._mesh_edit_changed_indices.clear()
         self.preview_photos = []
         self.destroy()
 
@@ -775,7 +1179,17 @@ class SceneSeparationWindow(tk.Toplevel):
                 )
             )
 
-        return layers
+        background_layers = [
+            layer
+            for layer in layers
+            if layer[0] == "Background"
+        ]
+        foreground_layers = [
+            layer
+            for layer in layers
+            if layer[0] != "Background"
+        ]
+        return background_layers + foreground_layers
 
     def _build_depth_band_layers(self, frame, depth, layer_count):
         quantiles = np.quantile(
@@ -829,10 +1243,30 @@ class SceneSeparationWindow(tk.Toplevel):
         self.processing = False
         self.source_frame = frame
         self.depth_map = depth
-        self.layer_masks = layers
+        masks = compose_layer_masks([mask for _, _, mask in layers])
+        self.layer_masks = []
+        for (name, _, _), mask in zip(layers, masks):
+            self.layer_masks.append(
+                (name, self._mask_rgba(frame, mask), mask)
+            )
+        self.base_layer_masks = [mask.copy() for mask in masks]
+        self.deformed_layer_masks = [mask.copy() for mask in masks]
+        self.mask_source_contours = [
+            extract_mask_contours(mask)
+            for mask in masks
+        ]
+        self.mask_target_contours = [
+            copy_mask_contours(contours)
+            for contours in self.mask_source_contours
+        ]
+        self.mesh_editing = False
+        self._mesh_edit_start_masks = None
+        self._mesh_edit_changed_indices.clear()
+        self._dragged_mesh_node = None
         self.processing_status.set(
             "Complete - {} local layers".format(len(layers))
         )
+        self.mesh_edit_button.configure(text="Edit Mask Mesh")
         self._render_layer_buttons()
         self.preview_canvas.delete("all")
         self.preview_photos = []
@@ -860,8 +1294,328 @@ class SceneSeparationWindow(tk.Toplevel):
         self.preview_photos = []
         self._redraw_preview()
 
+    def _toggle_mesh_editing(self):
+        if not self.layer_masks:
+            self.processing_status.set("Process a frame before editing its masks")
+            return
+
+        if self.mesh_editing:
+            self.mesh_editing = False
+            self._dragged_mesh_node = None
+            self._commit_mesh_edits()
+        else:
+            self.mesh_editing = True
+            self._mesh_edit_start_masks = [
+                mask.copy()
+                for _, _, mask in self.layer_masks
+            ]
+            self._mesh_edit_changed_indices.clear()
+            self._dragged_mesh_node = None
+
+        self.mesh_edit_button.configure(
+            text=(
+                "Finish Mesh Editing"
+                if self.mesh_editing
+                else "Edit Mask Mesh"
+            )
+        )
+        self.preview_canvas.configure(
+            cursor="crosshair" if self.mesh_editing else ""
+        )
+        self.processing_status.set(
+            "Drag edge points; double-click to add, right-click to remove"
+            if self.mesh_editing
+            else "Mesh editing finished"
+        )
+        self._redraw_preview()
+
+    def _reset_current_mesh(self):
+        if not self.layer_masks:
+            self.processing_status.set("Process a frame before resetting its mask")
+            return
+
+        if not self.mesh_editing:
+            self.processing_status.set(
+                "Enter mesh editing before resetting a mesh"
+            )
+            return
+
+        index = max(0, min(self.preview_layer, len(self.layer_masks) - 1))
+        self.mask_target_contours[index] = copy_mask_contours(
+            self.mask_source_contours[index]
+        )
+        name, _, _ = self.layer_masks[index]
+        mask = self.base_layer_masks[index].copy()
+        self.deformed_layer_masks[index] = mask
+        self.layer_masks[index] = (
+            name,
+            self._mask_rgba(self.source_frame, mask),
+            mask,
+        )
+        self._mesh_edit_changed_indices.add(index)
+        self.processing_status.set("Reset {} mesh".format(name))
+        self._redraw_preview()
+
+    def _insert_mask_node(self, event):
+        if not self.mesh_editing or self._preview_bounds is None:
+            return
+
+        bounds = self._preview_bounds
+        origin_x, origin_y, display_width, display_height, width, height = bounds
+        point_x = (event.x - origin_x) * width / float(display_width)
+        point_y = (event.y - origin_y) * height / float(display_height)
+        if not (0 <= point_x < width and 0 <= point_y < height):
+            return
+
+        index = self.preview_layer
+        contours, insertion = insert_contour_point(
+            self.mask_target_contours[index],
+            point_x,
+            point_y,
+            12.0 * max(
+                width / float(display_width),
+                height / float(display_height),
+            ),
+        )
+        if insertion is None:
+            self.processing_status.set(
+                "Double-click directly on an edge, away from existing points"
+            )
+            return
+
+        contour_index, segment_index, fraction, insertion_index = insertion
+        source_contours = copy_mask_contours(
+            self.mask_source_contours[index]
+        )
+        source_points, depth = source_contours[contour_index]
+        source_start = source_points[segment_index]
+        source_end = source_points[(segment_index + 1) % len(source_points)]
+        source_point = source_start + fraction * (source_end - source_start)
+        source_contours[contour_index] = (
+            np.insert(source_points, insertion_index, source_point, axis=0),
+            depth,
+        )
+        self.mask_source_contours[index] = source_contours
+        self.mask_target_contours[index] = contours
+        self._mesh_edit_changed_indices.add(index)
+        self.processing_status.set(
+            "Added edge point; drag it to refine the mask"
+        )
+        self._redraw_preview()
+
+    def _find_contour_node_at(self, event):
+        if self._preview_bounds is None:
+            return None
+        bounds = self._preview_bounds
+        origin_x, origin_y, display_width, display_height, width, height = bounds
+        contours = self.mask_target_contours[self.preview_layer]
+        nearest_node = None
+        nearest_distance = 12.0
+        for contour_index, (points, _) in enumerate(contours):
+            for point_index, (node_x, node_y) in enumerate(points):
+                screen_x = origin_x + node_x * display_width / float(width)
+                screen_y = origin_y + node_y * display_height / float(height)
+                distance = np.hypot(event.x - screen_x, event.y - screen_y)
+                if distance <= nearest_distance:
+                    nearest_node = (contour_index, point_index)
+                    nearest_distance = distance
+        return nearest_node
+
+    def _delete_mask_node(self, event):
+        if not self.mesh_editing:
+            return
+        node = self._find_contour_node_at(event)
+        if node is None:
+            return
+
+        index = self.preview_layer
+        contour_index, point_index = node
+        source_contours = copy_mask_contours(
+            self.mask_source_contours[index]
+        )
+        target_contours = copy_mask_contours(
+            self.mask_target_contours[index]
+        )
+        source_points, source_depth = source_contours[contour_index]
+        target_points, target_depth = target_contours[contour_index]
+        if len(target_points) <= 3:
+            self.processing_status.set(
+                "A mask edge needs at least three points"
+            )
+            return
+
+        source_points = np.delete(source_points, point_index, axis=0)
+        target_points = np.delete(target_points, point_index, axis=0)
+        if not is_valid_contour_edit(source_points, target_points):
+            self.processing_status.set(
+                "That point cannot be removed without distorting the edge"
+            )
+            return
+
+        source_contours[contour_index] = (source_points, source_depth)
+        target_contours[contour_index] = (target_points, target_depth)
+        self.mask_source_contours[index] = source_contours
+        self.mask_target_contours[index] = target_contours
+        self._apply_mask_contours(index)
+        self.processing_status.set("Removed mask edge point")
+        self._redraw_preview()
+
+    def _start_mesh_drag(self, event):
+        if not self.mesh_editing:
+            return
+
+        nearest_node = self._find_contour_node_at(event)
+
+        if nearest_node is not None:
+            self._dragged_mesh_node = nearest_node
+            self.preview_canvas.configure(cursor="fleur")
+            self._drag_mesh_node(event)
+
+    def _drag_mesh_node(self, event):
+        if (
+            not self.mesh_editing
+            or self._dragged_mesh_node is None
+            or self._preview_bounds is None
+        ):
+            return
+
+        bounds = self._preview_bounds
+        origin_x, origin_y, display_width, display_height, width, height = bounds
+        contour_index, point_index = self._dragged_mesh_node
+        point_x = (event.x - origin_x) * width / float(display_width)
+        point_y = (event.y - origin_y) * height / float(display_height)
+        point_x = min(float(width - 1), max(0.0, point_x))
+        point_y = min(float(height - 1), max(0.0, point_y))
+
+        index = self.preview_layer
+        contours = copy_mask_contours(self.mask_target_contours[index])
+        points, depth = contours[contour_index]
+        updated_points = points.copy()
+        updated_points[point_index] = (point_x, point_y)
+        if not is_valid_contour_edit(
+            self.mask_source_contours[index][contour_index][0],
+            updated_points,
+        ):
+            return
+
+        contours[contour_index] = (updated_points, depth)
+        self.mask_target_contours[index] = contours
+        self._apply_mask_contours(index)
+        self._redraw_preview()
+
+    def _finish_mesh_drag(self, event):
+        self._dragged_mesh_node = None
+        event.widget.configure(
+            cursor="crosshair" if self.mesh_editing else ""
+        )
+
+    def _apply_mask_contours(self, index):
+        mask = rasterize_mask_contours(
+            self.base_layer_masks[index].shape,
+            self.mask_target_contours[index],
+        )
+        self.deformed_layer_masks[index] = mask
+        name, _, _ = self.layer_masks[index]
+        self.layer_masks[index] = (
+            name,
+            self._mask_rgba(self.source_frame, mask),
+            mask,
+        )
+        self._mesh_edit_changed_indices.add(index)
+
+    def _commit_mesh_edits(self):
+        if not self._mesh_edit_changed_indices:
+            self._mesh_edit_start_masks = None
+            return
+
+        for index in self._mesh_edit_changed_indices:
+            source_contours = copy_mask_contours(
+                self.mask_source_contours[index]
+            )
+            target_contours = copy_mask_contours(
+                self.mask_target_contours[index]
+            )
+            removed_points = 0
+            for contour_index, (source_points, source_depth) in enumerate(
+                source_contours
+            ):
+                target_points, target_depth = target_contours[contour_index]
+                source_points, target_points, removed = (
+                    remove_redundant_contour_points(
+                        source_points,
+                        target_points,
+                    )
+                )
+                source_contours[contour_index] = (
+                    source_points,
+                    source_depth,
+                )
+                target_contours[contour_index] = (
+                    target_points,
+                    target_depth,
+                )
+                removed_points += removed
+
+            if removed_points:
+                self.mask_source_contours[index] = source_contours
+                self.mask_target_contours[index] = target_contours
+                self.deformed_layer_masks[index] = rasterize_mask_contours(
+                    self.base_layer_masks[index].shape,
+                    target_contours,
+                )
+                name, _, _ = self.layer_masks[index]
+                mask = self.deformed_layer_masks[index]
+                self.layer_masks[index] = (
+                    name,
+                    self._mask_rgba(self.source_frame, mask),
+                    mask,
+                )
+
+        candidates = self.deformed_layer_masks
+        previous_masks = self._mesh_edit_start_masks
+        masks = compose_layer_masks(candidates)
+        for index in sorted(self._mesh_edit_changed_indices, reverse=True):
+            candidates, masks = propagate_layer_mask_change(
+                candidates,
+                previous_masks,
+                index,
+            )
+
+        self.deformed_layer_masks = candidates
+        for index, ((name, _, _), mask) in enumerate(
+            zip(self.layer_masks, masks)
+        ):
+            self.layer_masks[index] = (
+                name,
+                self._mask_rgba(self.source_frame, mask),
+                mask,
+            )
+
+        indices_to_rebase = {
+            index
+            for changed_index in self._mesh_edit_changed_indices
+            for index in range(changed_index)
+        }
+        indices_to_rebase.difference_update(self._mesh_edit_changed_indices)
+        for index in indices_to_rebase:
+            mask = masks[index]
+            self.base_layer_masks[index] = mask.copy()
+            self.deformed_layer_masks[index] = mask.copy()
+            self.mask_source_contours[index] = extract_mask_contours(mask)
+            self.mask_target_contours[index] = copy_mask_contours(
+                self.mask_source_contours[index]
+            )
+        self._mesh_edit_start_masks = None
+        self._mesh_edit_changed_indices.clear()
+
     def _export_layers(self):
         if not self.layer_masks:
+            return
+
+        if self.mesh_editing:
+            self.processing_status.set(
+                "Finish mesh editing before adding layers to the timeline"
+            )
             return
 
         cache_root = get_scene_separation_cache_root()
@@ -932,7 +1686,43 @@ class SceneSeparationWindow(tk.Toplevel):
             return
 
         self.preview_canvas.delete("all")
-        if hasattr(self, "preview_layer") and self.layer_masks:
+        editing_layer = (
+            self.mesh_editing
+            and hasattr(self, "preview_layer")
+            and self.layer_masks
+        )
+        if editing_layer:
+            index = max(
+                0,
+                min(
+                    self.preview_layer,
+                    len(self.layer_masks) - 1,
+                ),
+            )
+            mask = np.clip(self.layer_masks[index][2], 0.0, 1.0)
+            tint = np.empty_like(self.source_frame)
+            tint[:, :] = (35, 205, 255)
+            blend = (mask[:, :, np.newaxis] * 0.38).astype(np.float32)
+            frame = np.clip(
+                self.source_frame.astype(np.float32) * (1.0 - blend)
+                + tint.astype(np.float32) * blend,
+                0,
+                255,
+            ).astype(np.uint8)
+            control_edges = _draw_mask_contours(
+                mask,
+                self.mask_target_contours[index],
+            )
+            mesh_alpha = (control_edges.astype(np.float32) / 255.0 * 0.85)[
+                :, :, np.newaxis
+            ]
+            frame = np.clip(
+                frame.astype(np.float32) * (1.0 - mesh_alpha)
+                + np.asarray((45, 255, 185), dtype=np.float32) * mesh_alpha,
+                0,
+                255,
+            ).astype(np.uint8)
+        elif hasattr(self, "preview_layer") and self.layer_masks:
             index = max(
                 0,
                 min(
@@ -969,9 +1759,33 @@ class SceneSeparationWindow(tk.Toplevel):
 
         x = (canvas_width - display_width) // 2
         y = (canvas_height - display_height) // 2
+        height, width = self.source_frame.shape[:2]
+        self._preview_bounds = (
+            x,
+            y,
+            display_width,
+            display_height,
+            width,
+            height,
+        )
         self.preview_canvas.create_image(
             x,
             y,
             anchor="nw",
             image=photo,
         )
+        if editing_layer:
+            for points, _ in self.mask_target_contours[index]:
+                for point_x, point_y in points:
+                    screen_x = x + point_x * display_width / float(width)
+                    screen_y = y + point_y * display_height / float(height)
+                    radius = 4
+                    self.preview_canvas.create_oval(
+                        screen_x - radius,
+                        screen_y - radius,
+                        screen_x + radius,
+                        screen_y + radius,
+                        fill=BG,
+                        outline=TEXT,
+                        width=2,
+                    )
