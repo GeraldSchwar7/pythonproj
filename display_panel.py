@@ -34,7 +34,8 @@ class DisplayPanel(tk.Frame):
 
     def __init__(
         self,
-        parent
+        parent,
+        viewport_resolution=(1920, 1080),
     ):
 
         super().__init__(
@@ -43,6 +44,8 @@ class DisplayPanel(tk.Frame):
             highlightbackground=BORDER,
             highlightthickness=1
         )
+
+        self.viewport_resolution = viewport_resolution
 
         # ==================================================
         # VIEWPORT RENDER SCHEDULING
@@ -117,6 +120,17 @@ class DisplayPanel(tk.Frame):
             fg=TEXT_DIM,
             font=(FONT, 7, "bold")
         ).pack(side="left", padx=10)
+
+        self.viewport_resolution_label = tk.Label(
+            title_bar,
+            text="{} x {}".format(*self.viewport_resolution),
+            bg=PANEL_LIGHT,
+            fg=TEXT_DIM,
+            font=(FONT, 7, "bold"),
+            padx=7,
+            pady=3,
+        )
+        self.viewport_resolution_label.pack(side="right", padx=(0, 7))
 
         tk.Label(
             title_bar,
@@ -228,22 +242,27 @@ class DisplayPanel(tk.Frame):
 
     def _create_viewport_tab(self):
 
+        self.viewport_container = tk.Frame(
+            self.viewport_tab,
+            bg=CANVAS_BG,
+        )
+
+        self.viewport_container.pack(
+            fill="both",
+            expand=True,
+            padx=5,
+            pady=5,
+        )
+
         self.viewport_canvas = (
             tk.Canvas(
-                self.viewport_tab,
+                self.viewport_container,
                 bg=CANVAS_BG,
                 highlightthickness=0
             )
         )
 
-        self.viewport_canvas.pack(
-            fill="both",
-            expand=True,
-            padx=5,
-            pady=5
-        )
-
-        self.viewport_canvas.bind(
+        self.viewport_container.bind(
             "<Configure>",
             lambda event:
                 self.render_viewport()
@@ -572,28 +591,31 @@ class DisplayPanel(tk.Frame):
 
             return
 
-        self.viewport_canvas.delete(
-            "all"
-        )
-
-        self.viewport_photos.clear()
-
-        width = (
-            self.viewport_canvas
-            .winfo_width()
-        )
-
-        height = (
-            self.viewport_canvas
-            .winfo_height()
-        )
+        container_width = self.viewport_container.winfo_width()
+        container_height = self.viewport_container.winfo_height()
 
         if (
-            width <= 1
-            or height <= 1
+            container_width <= 1
+            or container_height <= 1
         ):
-
             return
+
+        resolution_width, resolution_height = self.viewport_resolution
+        preview_scale = min(
+            container_width / resolution_width,
+            container_height / resolution_height,
+        )
+        width = max(1, int(resolution_width * preview_scale))
+        height = max(1, int(resolution_height * preview_scale))
+        self.viewport_canvas.place(
+            relx=0.5,
+            rely=0.5,
+            anchor="center",
+            width=width,
+            height=height,
+        )
+        self.viewport_canvas.delete("all")
+        self.viewport_photos.clear()
 
         # ==================================================
         # FIND ACTIVE MEDIA
@@ -652,6 +674,7 @@ class DisplayPanel(tk.Frame):
                 justify="center"
             )
 
+            self._draw_viewport_bounds(width, height)
             return
 
         # ==================================================
@@ -704,10 +727,10 @@ class DisplayPanel(tk.Frame):
 
                 self.viewport_canvas.create_image(
                     width / 2
-                    + layer.x,
+                    + layer.x * preview_scale,
 
                     height / 2
-                    + layer.y,
+                    + layer.y * preview_scale,
 
                     image=photo,
 
@@ -721,6 +744,18 @@ class DisplayPanel(tk.Frame):
                     "viewport clip:",
                     error
                 )
+
+        self._draw_viewport_bounds(width, height)
+
+    def _draw_viewport_bounds(self, width, height):
+        self.viewport_canvas.create_rectangle(
+            0,
+            0,
+            width - 1,
+            height - 1,
+            outline=BORDER,
+            width=1,
+        )
 
     # ======================================================
     # POP OUT CAMERA

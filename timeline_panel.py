@@ -688,12 +688,36 @@ class TimelinePanel(tk.Frame):
         right_x = clip.end_time * self.pixels_per_second
         left_distance = abs(timeline_x - left_x)
         right_distance = abs(timeline_x - right_x)
+        grab_width = self.clip_resize_grab_width
+        if clip.media_type == "image":
+            grab_width += 3
 
-        if min(left_distance, right_distance) > self.clip_resize_grab_width:
+        if min(left_distance, right_distance) > grab_width:
             return None, None, None
 
         edge = "left" if left_distance <= right_distance else "right"
         return layer, clip, edge
+
+    def contains_hand_drag_target_at_screen(self, screen_x, screen_y):
+        canvas_x = self.canvas.canvasx(
+            screen_x - self.canvas.winfo_rootx()
+        )
+        canvas_y = self.canvas.canvasy(
+            screen_y - self.canvas.winfo_rooty()
+        )
+
+        if self.current_tool == "Resize":
+            _, clip, edge = self._find_clip_resize_edge(
+                canvas_x,
+                canvas_y,
+            )
+            return clip is not None and edge is not None
+
+        if self.current_tool == "Move":
+            _, clip = self._find_clip_at_position(canvas_x, canvas_y)
+            return clip is not None
+
+        return False
 
     def _layer_reorder_handle_at_position(self, timeline_x, timeline_y):
         if not (6 <= timeline_x <= 20) or timeline_y < self.RULER_HEIGHT:

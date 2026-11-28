@@ -1,6 +1,6 @@
 import tkinter as tk
 
-from settings import BG
+from settings import BG, BORDER
 
 from asset_browser import (
     AssetBrowser
@@ -27,6 +27,20 @@ from media_clip import MediaClip
 from layer import Layer
 
 
+def _create_paned_window(parent, orient):
+    return tk.PanedWindow(
+        parent,
+        orient=orient,
+        # Defer panel reflow until release to avoid redraw artifacts.
+        opaqueresize=False,
+        background=BORDER,
+        borderwidth=0,
+        relief="flat",
+        sashwidth=6,
+        sashrelief="flat",
+    )
+
+
 class Workspace(tk.Frame):
 
     def __init__(
@@ -34,7 +48,8 @@ class Workspace(tk.Frame):
         parent,
         on_status=None,
         on_hand_control_toggle=None,
-        on_calibrate=None
+        on_calibrate=None,
+        viewport_resolution=(1920, 1080),
     ):
 
         super().__init__(
@@ -44,42 +59,62 @@ class Workspace(tk.Frame):
 
         self.on_status = on_status
         self.scene_separation_windows = []
+        self._initial_sashes_set = False
+        self._initial_sash_job = None
 
-        # ==================================================
-        # GRID
-        # ==================================================
-
-        # Assets / tools
-        self.grid_columnconfigure(
-            0,
-            weight=1,
-            minsize=205
+        self.column_panes = _create_paned_window(
+            self,
+            tk.HORIZONTAL,
         )
+        self.column_panes.pack(fill="both", expand=True)
 
-        # Main editor
-        self.grid_columnconfigure(
-            1,
-            weight=5,
-            minsize=380
+        self.left_panes = _create_paned_window(
+            self.column_panes,
+            tk.VERTICAL,
         )
-
-        # Layers
-        self.grid_columnconfigure(
-            2,
-            weight=1,
-            minsize=205
+        self.editor_panes = _create_paned_window(
+            self.column_panes,
+            tk.VERTICAL,
         )
-
-        # Display
-        self.grid_rowconfigure(
-            0,
-            weight=4
+        self.timeline_panes = _create_paned_window(
+            self.editor_panes,
+            tk.HORIZONTAL,
         )
-
-        # Timeline / tools / layers
-        self.grid_rowconfigure(
-            1,
-            weight=2
+        self.left_assets_container = tk.Frame(self.left_panes, bg=BG)
+        self.left_tools_container = tk.Frame(self.left_panes, bg=BG)
+        self.display_container = tk.Frame(self.editor_panes, bg=BG)
+        self.left_assets_container.pack_propagate(False)
+        self.left_tools_container.pack_propagate(False)
+        self.display_container.pack_propagate(False)
+        self.column_panes.add(
+            self.left_panes,
+            minsize=205,
+            stretch="always",
+        )
+        self.column_panes.add(
+            self.editor_panes,
+            minsize=591,
+            stretch="always",
+        )
+        self.left_panes.add(
+            self.left_assets_container,
+            minsize=150,
+            stretch="always",
+        )
+        self.left_panes.add(
+            self.left_tools_container,
+            minsize=180,
+            stretch="always",
+        )
+        self.editor_panes.add(
+            self.display_container,
+            minsize=220,
+            stretch="always",
+        )
+        self.editor_panes.add(
+            self.timeline_panes,
+            minsize=210,
+            stretch="always",
         )
 
         # ==================================================
@@ -87,24 +122,24 @@ class Workspace(tk.Frame):
         # ==================================================
 
         self.display = DisplayPanel(
-            self
+            self.display_container,
+            viewport_resolution=viewport_resolution,
         )
 
-        self.display.grid(
-            row=0,
-            column=1,
-            columnspan=2,
-            sticky="nsew",
+        self.display.pack(
+            fill="both",
+            expand=True,
             padx=7,
-            pady=7
+            pady=7,
         )
 
         # ==================================================
         # TIMELINE
         # ==================================================
 
+        self.timeline_container = tk.Frame(self.timeline_panes, bg=BG)
         self.timeline = TimelinePanel(
-            self,
+            self.timeline_container,
 
             on_clip_added=
                 self._on_clip_added,
@@ -128,30 +163,41 @@ class Workspace(tk.Frame):
                 on_calibrate
         )
 
-        self.timeline.grid(
-            row=1,
-            column=1,
-            sticky="nsew",
+        self.timeline_container.pack_propagate(False)
+        self.timeline.pack(
+            fill="both",
+            expand=True,
             padx=7,
-            pady=(0, 7)
+            pady=(0, 7),
+        )
+        self.timeline_panes.add(
+            self.timeline_container,
+            minsize=380,
+            stretch="always",
         )
 
         # ==================================================
         # LAYER EFFECTS
         # ==================================================
 
+        self.layer_effects_container = tk.Frame(self.timeline_panes, bg=BG)
         self.layer_effects = LayerEffectsPanel(
-            self,
+            self.layer_effects_container,
             on_scene_separation=self._open_scene_separation,
             on_hue_saturation=self._open_hue_saturation,
         )
 
-        self.layer_effects.grid(
-            row=1,
-            column=2,
-            sticky="nsew",
+        self.layer_effects_container.pack_propagate(False)
+        self.layer_effects.pack(
+            fill="both",
+            expand=True,
             padx=7,
-            pady=(0, 7)
+            pady=(0, 7),
+        )
+        self.timeline_panes.add(
+            self.layer_effects_container,
+            minsize=205,
+            stretch="always",
         )
 
         # ==================================================
@@ -159,18 +205,17 @@ class Workspace(tk.Frame):
         # ==================================================
 
         self.assets = AssetBrowser(
-            self,
+            self.left_assets_container,
 
             on_asset_drop=
                 self._on_asset_drop
         )
 
-        self.assets.grid(
-            row=0,
-            column=0,
-            sticky="nsew",
+        self.assets.pack(
+            fill="both",
+            expand=True,
             padx=7,
-            pady=7
+            pady=7,
         )
 
         # ==================================================
@@ -178,17 +223,18 @@ class Workspace(tk.Frame):
         # ==================================================
 
         self.tools = ToolPanel(
-            self,
+            self.left_tools_container,
             on_tool_selected=self._on_tool_selected
         )
 
-        self.tools.grid(
-            row=1,
-            column=0,
-            sticky="nsew",
+        self.tools.pack(
+            fill="both",
+            expand=True,
             padx=7,
-            pady=(0, 7)
+            pady=(0, 7),
         )
+
+        self.bind("<Configure>", self._schedule_initial_sashes, add="+")
 
         # ==================================================
         # INITIAL SYNCHRONIZATION
@@ -204,6 +250,41 @@ class Workspace(tk.Frame):
         self.display.set_viewport_time(
             self.timeline.current_time
         )
+
+    def _schedule_initial_sashes(self, event):
+        if event.widget is self and not self._initial_sashes_set:
+            if self._initial_sash_job is not None:
+                self.after_cancel(self._initial_sash_job)
+            self._initial_sash_job = self.after(
+                50,
+                self._set_initial_sash_positions,
+            )
+
+    def _set_initial_sash_positions(self):
+        self._initial_sash_job = None
+        self._initial_sashes_set = True
+        workspace_width = self.column_panes.winfo_width()
+        workspace_height = self.column_panes.winfo_height()
+        if workspace_width <= 1 or workspace_height <= 1:
+            return
+
+        available_width = workspace_width - 6
+        extra_width = max(0, available_width - 796)
+        left_width = 205 + extra_width / 7
+        self.column_panes.sash_place(0, int(left_width), 0)
+        self.update_idletasks()
+
+        bottom_width = max(0, self.timeline_panes.winfo_width() - 6)
+        timeline_extra = max(0, bottom_width - 585)
+        self.timeline_panes.sash_place(
+            0,
+            int(380 + timeline_extra * 5 / 6),
+            0,
+        )
+
+        vertical_position = int((workspace_height - 6) * 4 / 6)
+        self.left_panes.sash_place(0, 0, vertical_position)
+        self.editor_panes.sash_place(0, 0, vertical_position)
 
     def _on_tool_selected(self, tool_name):
         self.timeline.set_tool(tool_name)

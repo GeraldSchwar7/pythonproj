@@ -28,3 +28,12 @@ testing.venv\Scripts\python.exe -m pip install opencv-python mediapipe pyautogui
 | `onnxscript` | `import onnxscript` | ONNX model export support |
 | `onnxslim` | `from onnxslim import slim` | ONNX model optimization |
 | `safetensors` | `import safetensors` | Safe model-weight support |
+
+## Startup checks
+
+The application shows a loading screen while it checks required Python imports,
+bundled model files, camera availability, and cache-directory access. It clears
+`scene_separation_cache` on every launch, including PNG layers exported there
+by scene separation. Copy any of those files elsewhere before restarting if
+you need to keep them. Startup enables OpenCV optimizations without changing
+camera or gesture frame rates.

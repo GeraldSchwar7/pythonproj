@@ -30,12 +30,12 @@ from gesture_controller import GestureController
 
 class CameraViewerApp:
 
-    def __init__(self, root):
+    def __init__(self, root, viewport_resolution=(1920, 1080)):
 
         self.root = root
         self._closing = False
         self._update_frame_job = None
-        self.pinch_asset_drag_allowed = False
+        self.pinch_drag_allowed = False
         self.hand_control_paused = False
         self.latest_hand_position = None
         self.last_frame_size = None
@@ -95,7 +95,8 @@ class CameraViewerApp:
             self.root,
             on_status=self.set_status,
             on_hand_control_toggle=self.toggle_hand_control,
-            on_calibrate=self.open_hand_control_settings
+            on_calibrate=self.open_hand_control_settings,
+            viewport_resolution=viewport_resolution,
         )
 
         self.editor = EditorController(
@@ -231,7 +232,7 @@ class CameraViewerApp:
             self.hand_mouse.disable()
             self.hand_tracker.cancel_pinch()
             self.gesture_controller.reset_tool_gesture()
-            self.pinch_asset_drag_allowed = False
+            self.pinch_drag_allowed = False
         else:
             self.hand_mouse.enable()
 
@@ -731,7 +732,7 @@ class CameraViewerApp:
         if self.hand_control_paused:
             if self.hand_mouse.is_mouse_down:
                 self.hand_mouse.mouse_up()
-            self.pinch_asset_drag_allowed = False
+            self.pinch_drag_allowed = False
             return
 
         detected_tool = self.gesture_controller.detect_tool_gesture(
@@ -766,13 +767,17 @@ class CameraViewerApp:
             pinch_state = self.hand_tracker.cancel_pinch()
 
         if pinch_state["pressed"]:
-            self.pinch_asset_drag_allowed = (
+            self.pinch_drag_allowed = (
                 self.workspace.assets.contains_asset_at_screen(
                     self.hand_mouse.current_x,
                     self.hand_mouse.current_y
                 )
+                or self.workspace.timeline.contains_hand_drag_target_at_screen(
+                    self.hand_mouse.current_x,
+                    self.hand_mouse.current_y
+                )
             )
-            if self.pinch_asset_drag_allowed:
+            if self.pinch_drag_allowed:
                 self.hand_mouse.mouse_down()
             else:
                 self.hand_mouse.click()
@@ -797,7 +802,7 @@ class CameraViewerApp:
         if (
             pinch_state["pinching"]
             and pinch_state["dragging"]
-            and self.pinch_asset_drag_allowed
+            and self.pinch_drag_allowed
         ):
             if not self.hand_mouse.is_mouse_down:
                 self.hand_mouse.mouse_down()
@@ -814,7 +819,7 @@ class CameraViewerApp:
             if self.hand_mouse.is_mouse_down:
                 self.hand_mouse.mouse_up()
                 print("DRAG RELEASE")
-            self.pinch_asset_drag_allowed = False
+            self.pinch_drag_allowed = False
 
     # ========================================================
     # STATUS

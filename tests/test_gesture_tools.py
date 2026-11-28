@@ -7,6 +7,7 @@ import pyautogui
 
 from app import CameraViewerApp
 from asset_browser import AssetBrowser
+from display_panel import DisplayPanel
 from gesture_controller import GestureController
 from hand_tracker import HandMouseController, HandTracker
 from layer import Layer
@@ -149,7 +150,8 @@ class AppGestureRoutingTests(unittest.TestCase):
         app.hand_mouse.current_y = 150
         app.workspace = Mock()
         app.workspace.assets.contains_asset_at_screen.return_value = False
-        app.pinch_asset_drag_allowed = False
+        app.workspace.timeline.contains_hand_drag_target_at_screen.return_value = False
+        app.pinch_drag_allowed = False
         app.hand_control_paused = False
         app.gesture_controller = GestureController()
         app.gesture_controller.detect_tool_gesture = Mock(
@@ -273,7 +275,7 @@ class AppGestureRoutingTests(unittest.TestCase):
             "drag_offset": (20, 0),
             "cancelled": False
         },))
-        app.pinch_asset_drag_allowed = True
+        app.pinch_drag_allowed = True
 
         app._process_hand_controls(frame, {})
 
@@ -281,7 +283,7 @@ class AppGestureRoutingTests(unittest.TestCase):
         app.hand_mouse.move_drag.assert_called_once_with(20, 0, 640, 480)
         app.editor.select_tool.assert_not_called()
 
-    def test_pinch_drag_is_only_started_from_an_asset_thumbnail(self):
+    def test_pinch_drag_is_started_from_an_asset_thumbnail(self):
         app, frame = self.make_app((
             {
                 "pinching": True,
@@ -321,7 +323,61 @@ class AppGestureRoutingTests(unittest.TestCase):
         app.hand_mouse.mouse_down.assert_called_once()
         app.hand_mouse.move_drag.assert_called_once_with(20, 0, 640, 480)
 
-    def test_pinch_drag_is_blocked_when_started_outside_asset_thumbnail(self):
+    def test_pinch_drag_is_started_from_a_timeline_resize_target(self):
+        app, frame = self.make_app((
+            {
+                "pinching": True,
+                "pressed": True,
+                "clicked": False,
+                "tap": False,
+                "released": False,
+                "dragging": False,
+                "drag_offset": (0, 0),
+                "cancelled": False
+            },
+            {
+                "pinching": True,
+                "pressed": False,
+                "clicked": False,
+                "tap": False,
+                "released": False,
+                "dragging": True,
+                "drag_offset": (20, 0),
+                "cancelled": False
+            },
+            {
+                "pinching": False,
+                "pressed": False,
+                "clicked": False,
+                "tap": False,
+                "released": True,
+                "dragging": True,
+                "drag_offset": (20, 0),
+                "cancelled": False
+            }
+        ))
+        app.workspace.timeline.contains_hand_drag_target_at_screen.return_value = True
+        app.hand_mouse.mouse_down.side_effect = lambda: setattr(
+            app.hand_mouse,
+            "is_mouse_down",
+            True
+        )
+
+        app._process_hand_controls(frame, {})
+        app._process_hand_controls(frame, {})
+        app._process_hand_controls(frame, {})
+
+        app.workspace.timeline.contains_hand_drag_target_at_screen.assert_called_once_with(
+            200,
+            150
+        )
+        app.hand_mouse.mouse_down.assert_called_once()
+        app.hand_mouse.move_drag.assert_called_once_with(20, 0, 640, 480)
+        app.hand_mouse.mouse_up.assert_called_once()
+        app.hand_mouse.click.assert_not_called()
+        self.assertFalse(app.pinch_drag_allowed)
+
+    def test_pinch_drag_is_blocked_outside_all_drag_targets(self):
         app, frame = self.make_app((
             {
                 "pinching": True,
@@ -349,6 +405,7 @@ class AppGestureRoutingTests(unittest.TestCase):
         app._process_hand_controls(frame, {})
 
         app.workspace.assets.contains_asset_at_screen.assert_called_once()
+        app.workspace.timeline.contains_hand_drag_target_at_screen.assert_called_once()
         app.hand_mouse.mouse_down.assert_not_called()
         app.hand_mouse.move_drag.assert_not_called()
 
@@ -397,7 +454,7 @@ class AppGestureRoutingTests(unittest.TestCase):
         app.gesture_controller.detect_tool_gesture.assert_not_called()
         app.hand_tracker.update_pinch.assert_not_called()
         app.hand_mouse.mouse_up.assert_called_once()
-        self.assertFalse(app.pinch_asset_drag_allowed)
+        self.assertFalse(app.pinch_drag_allowed)
 
     def test_pause_and_resume_reset_hand_control_state(self):
         app, _ = self.make_app(())
@@ -424,6 +481,35 @@ class AppGestureRoutingTests(unittest.TestCase):
             app.workspace.timeline.set_hand_control_paused.call_args_list,
             [unittest.mock.call(True), unittest.mock.call(False)]
         )
+
+
+class TimelineHandDragTargetTests(unittest.TestCase):
+    def make_panel(self, tool):
+        panel = TimelinePanel.__new__(TimelinePanel)
+        panel.current_tool = tool
+        panel.canvas = Mock()
+        panel.canvas.winfo_rootx.return_value = 100
+        panel.canvas.winfo_rooty.return_value = 200
+        panel.canvas.canvasx.side_effect = lambda value: value + 10
+        panel.canvas.canvasy.side_effect = lambda value: value + 20
+        return panel
+
+    def test_resize_tool_accepts_clip_edges_as_hand_drag_targets(self):
+        panel = self.make_panel("Resize")
+        panel._find_clip_resize_edge = Mock(
+            return_value=(object(), object(), "left")
+        )
+
+        self.assertTrue(panel.contains_hand_drag_target_at_screen(150, 260))
+        panel._find_clip_resize_edge.assert_called_once_with(60, 80)
+
+    def test_resize_tool_rejects_clip_body_away_from_resize_edges(self):
+        panel = self.make_panel("Resize")
+        panel._find_clip_resize_edge = Mock(
+            return_value=(object(), object(), None)
+        )
+
+        self.assertFalse(panel.contains_hand_drag_target_at_screen(150, 260))
 
 
 class StatusNotificationTests(unittest.TestCase):
@@ -763,6 +849,32 @@ class PinchTests(unittest.TestCase):
         self.assertFalse(tracker.is_pinching)
 
 
+class ViewportResolutionTests(unittest.TestCase):
+    def test_composition_frame_fits_canvas_without_distorting_aspect_ratio(self):
+        display = DisplayPanel.__new__(DisplayPanel)
+        display.viewport_container = Mock()
+        display.viewport_container.winfo_width.return_value = 800
+        display.viewport_container.winfo_height.return_value = 600
+        display.viewport_canvas = Mock()
+        display.viewport_photos = []
+        display.viewport_layers = []
+        display.viewport_time = 0.0
+
+        for resolution, expected_size in (
+            ((1920, 1080), (800, 450)),
+            ((1080, 1920), (337, 600)),
+        ):
+            with self.subTest(resolution=resolution):
+                display.viewport_resolution = resolution
+                display.render_viewport()
+
+                placement = display.viewport_canvas.place.call_args.kwargs
+                self.assertEqual(
+                    (placement["width"], placement["height"]),
+                    expected_size,
+                )
+
+
 class TimelineToolTests(unittest.TestCase):
     def make_timeline(self, layer, clip, current_time=0.0):
         timeline = TimelinePanel.__new__(TimelinePanel)
@@ -1000,6 +1112,31 @@ class TimelineToolTests(unittest.TestCase):
         self.assertIs(layer, timeline._find_clip_at_position.return_value[0])
         self.assertIs(found_clip, clip)
         self.assertEqual(edge, "left")
+
+    def test_image_resize_edge_hit_area_is_wider_than_video(self):
+        timeline = TimelinePanel.__new__(TimelinePanel)
+        timeline.pixels_per_second = 10
+        timeline.clip_resize_grab_width = 6
+
+        for media_type, expected_edge in (
+            ("video", None),
+            ("image", "left")
+        ):
+            with self.subTest(media_type=media_type):
+                clip = SimpleNamespace(
+                    media_type=media_type,
+                    start_time=2.0,
+                    duration=3.0,
+                    end_time=5.0
+                )
+                timeline._find_clip_at_position = Mock(
+                    return_value=(object(), clip)
+                )
+
+                _, found_clip, edge = timeline._find_clip_resize_edge(28, 50)
+
+                self.assertEqual(edge, expected_edge)
+                self.assertEqual(found_clip is not None, expected_edge is not None)
 
 
 class HandMouseTests(unittest.TestCase):
